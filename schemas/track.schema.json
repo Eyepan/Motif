@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motif.app/schemas/track.schema.json",
+  "title": "Track",
+  "description": "A library track as exchanged between Motif apps (sync, export). Mirrors the tracks table in library.sql.",
+  "type": "object",
+  "required": ["id", "title", "durationMs", "format", "source", "addedAt"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "title": { "type": "string" },
+    "artist": { "type": ["string", "null"] },
+    "album": { "type": ["string", "null"] },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "format": { "enum": ["flac", "wav", "alac", "aiff", "mp3", "aac", "ogg"] },
+    "sampleRate": { "type": ["integer", "null"] },
+    "bitDepth": { "type": ["integer", "null"] },
+    "channels": { "type": ["integer", "null"] },
+    "source": { "enum": ["local", "internet_archive", "jamendo", "bandcamp"] },
+    "sourceRef": { "type": ["string", "null"] },
+    "licenseUrl": { "type": ["string", "null"], "format": "uri" },
+    "bpm": { "type": ["number", "null"] },
+    "loudnessDb": { "type": ["number", "null"] },
+    "addedAt": { "type": "integer", "description": "Unix seconds" }
+  },
+  "additionalProperties": false
+}

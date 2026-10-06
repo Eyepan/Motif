@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dsp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/dsp
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  apple:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apps/apple
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test

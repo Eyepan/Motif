@@ -1,0 +1,4 @@
+module MotifDSP {
+    header "motif_dsp.h"
+    export *
+}

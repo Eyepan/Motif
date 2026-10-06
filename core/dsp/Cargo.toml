@@ -1,0 +1,16 @@
+[package]
+name = "motif-dsp"
+version = "0.1.0"
+edition = "2021"
+description = "Portable DSP core for Motif: analysis and DJ mixing primitives behind a C ABI"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+name = "motif_dsp"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
