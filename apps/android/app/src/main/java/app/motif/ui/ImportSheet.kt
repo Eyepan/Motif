@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -44,10 +45,10 @@ import app.motif.dsp.MotifDsp
 import app.motif.importer.ImportJob
 import app.motif.ui.theme.Motif
 
-/** Add Music: pick files or a whole folder (phone storage, SD card, USB drive); per-file progress. */
+/** Add Music: pick files or a whole folder (phone storage, SD card, USB drive), or go to Discover; per-file progress. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ImportSheet(app: MotifApp, onDismiss: () -> Unit) {
+fun ImportSheet(app: MotifApp, onDismiss: () -> Unit, onDiscover: () -> Unit) {
     val jobs by app.importer.jobs.collectAsStateWithLifecycle()
     val analyze by app.analyzeOnImport.collectAsStateWithLifecycle()
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { app.importer.importFiles(it) }
@@ -70,6 +71,7 @@ fun ImportSheet(app: MotifApp, onDismiss: () -> Unit) {
                     SourceRow(Icons.Outlined.Folder, "Folder", "A whole folder, including SD cards and USB drives") {
                         pickFolder.launch(null)
                     }
+                    SourceRow(Icons.Outlined.Explore, "Discover", "Search and download free lossless music from Jamendo and the Internet Archive", onDiscover)
                 }
             }
 

@@ -4,8 +4,14 @@ import android.app.Application
 import android.content.Context
 import app.motif.data.LibraryStore
 import app.motif.data.Track
+import app.motif.importer.CatalogArt
+import app.motif.importer.Downloads
 import app.motif.importer.Importer
 import app.motif.playback.PlaybackEngine
+import app.motif.playback.Previewer
+import app.motif.sources.InternetArchiveSource
+import app.motif.sources.JamendoSource
+import app.motif.sources.MusicSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +37,26 @@ class MotifApp : Application() {
 
     val importer by lazy { Importer(this, library, scope) { _analyzeOnImport.value } }
 
+    /** Built in from `JAMENDO_CLIENT_ID`, or pasted in Discover. */
+    private val _jamendoClientId by lazy {
+        MutableStateFlow(prefs.getString(KEY_JAMENDO, null)?.takeIf { it.isNotBlank() } ?: BuildConfig.JAMENDO_CLIENT_ID)
+    }
+    val jamendoClientId: StateFlow<String> get() = _jamendoClientId.asStateFlow()
+
+    fun setJamendoClientId(id: String) {
+        _jamendoClientId.value = id.trim().ifEmpty { BuildConfig.JAMENDO_CLIENT_ID }
+        prefs.edit().putString(KEY_JAMENDO, id.trim()).apply()
+    }
+
+    /** Catalogs Discover can search and download from. */
+    val sources: List<MusicSource> by lazy {
+        listOf(JamendoSource { _jamendoClientId.value }, InternetArchiveSource())
+    }
+
+    val downloads by lazy { Downloads(cacheDir, importer, scope) }
+
+    val previewer by lazy { Previewer(this) }
+
     val playback by lazy {
         PlaybackEngine(this, library, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
             prefs.edit().putBoolean(KEY_MIX, on).apply()
@@ -39,11 +65,15 @@ class MotifApp : Application() {
 
     fun delete(track: Track) {
         playback.remove(track)
-        scope.launch { library.delete(track) }
+        scope.launch {
+            library.delete(track)
+            CatalogArt.fileFor(filesDir, track.id).delete()
+        }
     }
 
     private companion object {
         const val KEY_ANALYZE = "analyze_on_import"
         const val KEY_MIX = "mix_into_next"
+        const val KEY_JAMENDO = "jamendo_client_id"
     }
 }
