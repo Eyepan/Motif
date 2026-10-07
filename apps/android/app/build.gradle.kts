@@ -20,6 +20,7 @@ android {
         // `jamendo.clientId` in ~/.gradle/gradle.properties. Empty means Discover asks for one.
         val jamendo = System.getenv("JAMENDO_CLIENT_ID") ?: providers.gradleProperty("jamendo.clientId").orNull ?: ""
         buildConfigField("String", "JAMENDO_CLIENT_ID", "\"${jamendo.trim()}\"")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -85,4 +86,11 @@ dependencies {
     testImplementation(libs.junit)
     // The real org.json, since android.jar's copy only has stubs in unit tests.
     testImplementation(libs.json)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.espresso.intents)
+    debugImplementation(libs.compose.ui.test.manifest)
 }
