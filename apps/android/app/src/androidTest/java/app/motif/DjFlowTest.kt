@@ -8,12 +8,15 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.motif.dsp.MotifDsp
 import app.motif.importer.ImportJob
+import app.motif.importer.TrackAnalyzer
 import app.motif.playback.DeckId
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import org.junit.Rule
@@ -60,7 +63,16 @@ class DjFlowTest {
 
     @Test fun syncLocksDeckBToDeckA() {
         val tracks = app.library.tracks.value.associateBy { it.title }
-        tracks.values.forEach { assertTrue("${it.title} has no beat grid: bpm ${it.bpm}, downbeat ${it.firstDownbeat}", it.hasBeatGrid) }
+        tracks.values.forEach { t ->
+            if (!t.hasBeatGrid) {
+                // Say why: analysis off, no native core, or what the analyser returns for this file.
+                val direct = runBlocking { runCatching { TrackAnalyzer.analyze(app.library.fileFor(t)) {} } }
+                fail(
+                    "${t.title} has no beat grid: bpm ${t.bpm}, downbeat ${t.firstDownbeat}, analyse on import ${app.analyzeOnImport.value}, " +
+                        "DSP ${MotifDsp.available}, direct analysis ${direct.map { r -> r?.let { "bpm ${it.bpm} downbeat ${it.firstDownbeat} key ${it.camelotKey}" } }}",
+                )
+            }
+        }
 
         compose.onNodeWithContentDescription("Open DJ mix").performClick()
         instrumentation.runOnMainSync {
