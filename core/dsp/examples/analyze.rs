@@ -7,7 +7,7 @@ use std::io::Read;
 fn main() {
     let mut bytes = Vec::new();
     std::io::stdin().read_to_end(&mut bytes).unwrap();
-    let audio: Vec<f32> = bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    let audio: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
     let sr = 44_100usize;
     let whole = analyze(&audio);
     let Some(anchor) = whole.first_downbeat else {
