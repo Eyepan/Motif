@@ -17,6 +17,7 @@ typedef struct {
     float bpm;      // estimated tempo, 0 if none found
     uint8_t camelot_number;  // Camelot key 1...12, 0 if none found
     uint8_t camelot_minor;   // 1 = minor ("A"), 0 = major ("B")
+    float first_downbeat;    // seconds to the beat grid's first downbeat, -1 if none
 } MotifAnalysis;
 
 typedef enum {
@@ -48,6 +49,45 @@ char *motif_meta_clean_field(const char *text, const char *const *suffixes, size
 // One credited artist per line, "role\tname", role "primary" or "featured".
 // `known` holds names already passed through motif_meta_norm.
 char *motif_meta_split_artists(const char *credit, const char *const *known, size_t count);
+
+// Beat-aligned mixing (core/dsp/src/mix.rs). Positions and lengths in seconds.
+typedef struct {
+    double bpm;             // 0 if unknown
+    double first_downbeat;  // negative if the track has no beat grid
+    double duration;
+} MotifTiming;
+
+typedef struct {
+    double out_start;  // outgoing position where the blend starts
+    double in_start;   // incoming position at that moment
+    double length;     // blend length, outgoing seconds
+    double rate;       // incoming playback speed
+    double lock;       // beat both lock to, real seconds; 0 = not beat aligned
+} MotifMixPlan;
+
+typedef enum {
+    MOTIF_MIX_SPEED = 0,  // set the incoming speed to value
+    MOTIF_MIX_SEEK = 1,   // move the incoming track to value seconds
+} MotifMixAction;
+
+typedef struct {
+    double progress;  // 0...1 through the blend
+    float gain_out;
+    float gain_in;
+    uint32_t action;  // MotifMixAction
+    double value;
+} MotifMixFollow;
+
+// Plans a blend from the end of outgoing into incoming.
+int32_t motif_mix_plan(const MotifTiming *outgoing, const MotifTiming *incoming, MotifMixPlan *out);
+// Call a few times a second during a blend with both tracks' positions.
+int32_t motif_mix_follow(const MotifMixPlan *plan, double out_pos, double in_pos, MotifMixFollow *out);
+// Speed and position putting the slave deck on the master's tempo and beat.
+// snap != 0 jumps onto the beat (SYNC pressed); 0 keeps the position and nudges
+// the speed (staying locked). Returns -1 without grids or if tempos are too far apart.
+int32_t motif_deck_sync(const MotifTiming *master, double master_pos, double master_speed,
+                        const MotifTiming *slave, double slave_pos, int32_t snap,
+                        double *out_speed, double *out_pos);
 
 #ifdef __cplusplus
 }

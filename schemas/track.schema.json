@@ -29,7 +29,7 @@
     "mbRecordingId": { "type": ["string", "null"], "format": "uuid", "description": "MusicBrainz recording MBID" },
     "mbReleaseId": { "type": ["string", "null"], "format": "uuid", "description": "MusicBrainz release MBID" },
     "energy": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-    "beatOffsetMs": { "type": ["integer", "null"], "minimum": 0, "description": "First downbeat" },
+    "beatOffsetMs": { "type": ["integer", "null"], "minimum": 0, "description": "First downbeat of the beat grid; beats follow every 60000/bpm ms" },
     "analyzerVersion": { "type": ["integer", "null"] },
     "contentHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the audio file" },
     "artworkHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
