@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://motif.app/schemas/track.schema.json",
   "title": "Track",
-  "description": "A library track as exchanged between Motif apps (sync, export). Mirrors the tracks table in library.sql.",
+  "description": "A library track as exchanged between Motif apps (sync, export, history snapshots). Mirrors the tracks table in library.sql plus its credited artists and genres.",
   "type": "object",
   "required": ["id", "title", "durationMs", "format", "source", "addedAt"],
   "properties": {
@@ -21,6 +21,45 @@
     "bpm": { "type": ["number", "null"] },
     "loudnessDb": { "type": ["number", "null"] },
     "musicalKey": { "type": ["string", "null"], "pattern": "^(1[0-2]|[1-9])[AB]$", "description": "Camelot notation" },
+    "albumArtist": { "type": ["string", "null"] },
+    "trackNo": { "type": ["integer", "null"], "minimum": 1 },
+    "discNo": { "type": ["integer", "null"], "minimum": 1 },
+    "releaseDate": { "type": ["string", "null"], "pattern": "^\\d{4}(-\\d{2}(-\\d{2})?)?$", "description": "ISO 8601 date, year or year-month" },
+    "isrc": { "type": ["string", "null"], "pattern": "^[A-Z]{2}[A-Z0-9]{3}\\d{7}$" },
+    "mbRecordingId": { "type": ["string", "null"], "format": "uuid", "description": "MusicBrainz recording MBID" },
+    "mbReleaseId": { "type": ["string", "null"], "format": "uuid", "description": "MusicBrainz release MBID" },
+    "energy": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "beatOffsetMs": { "type": ["integer", "null"], "minimum": 0, "description": "First downbeat" },
+    "analyzerVersion": { "type": ["integer", "null"] },
+    "contentHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the audio file" },
+    "artworkHash": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "artists": {
+      "type": "array",
+      "description": "Credited artists (track_artists). `artist` keeps the credit string as tagged.",
+      "items": {
+        "type": "object",
+        "required": ["name", "role"],
+        "properties": {
+          "name": { "type": "string" },
+          "role": { "enum": ["primary", "featured", "remixer", "composer", "album_artist"] },
+          "mbid": { "type": ["string", "null"], "format": "uuid" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "genres": {
+      "type": "array",
+      "description": "Genres (track_genres), ids from schemas/genres.json",
+      "items": {
+        "type": "object",
+        "required": ["id", "provenance"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+          "provenance": { "enum": ["user", "tag", "musicbrainz", "inferred"] }
+        },
+        "additionalProperties": false
+      }
+    },
     "addedAt": { "type": "integer", "description": "Unix seconds" }
   },
   "additionalProperties": false

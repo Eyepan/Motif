@@ -1,6 +1,7 @@
 package app.motif
 
 import app.motif.data.LibraryFilter
+import app.motif.data.artistsOf
 import app.motif.data.Track
 import app.motif.data.albumsOf
 import app.motif.playback.Mixing
@@ -75,5 +76,36 @@ class LibraryTest {
         assertEquals(124.0 / 120.0, Mixing.tempoRatio(track("a", bpm = 124.0), track("b", bpm = 120.0)), 1e-9)
         assertEquals(1.0, Mixing.tempoRatio(track("a", bpm = 124.0), track("b", bpm = 100.0)), 1e-9)
         assertEquals(1.0, Mixing.tempoRatio(track("a", bpm = 140.0), track("b", bpm = 70.0)), 1e-9)
+    }
+
+    /** Stand-in for the native splitter: commas, and "&" only between known names. */
+    private fun fakeSplit(credit: String, known: Collection<String>): List<Pair<String, String>> =
+        credit.split(",").map { it.trim() }.flatMap { part ->
+            val halves = part.split(" & ").map { it.trim() }
+            if (halves.size > 1 && halves.all { it.lowercase() in known }) halves else listOf(part)
+        }.map { it to "primary" }
+
+    @Test fun artistsCountEveryCreditedArtist() {
+        val tracks = listOf(
+            track("a").copy(artist = "Anirudh Ravichander, Shankar Mahadevan"),
+            track("b").copy(artist = "anirudh ravichander"),
+            track("c").copy(artist = "Simon & Garfunkel"),
+            track("d").copy(artist = null),
+        )
+        val artists = artistsOf(tracks, ::fakeSplit) { it.lowercase() }
+        assertEquals(
+            listOf("Anirudh Ravichander" to 2, "Shankar Mahadevan" to 1, "Simon & Garfunkel" to 1, "Unknown artist" to 1),
+            artists.map { it.name to it.tracks.size },
+        )
+    }
+
+    @Test fun ampersandSplitsWhenBothNamesAreKnown() {
+        val tracks = listOf(
+            track("a").copy(artist = "Simon & Garfunkel"),
+            track("b").copy(artist = "Simon"),
+            track("c").copy(artist = "Garfunkel"),
+        )
+        val artists = artistsOf(tracks, ::fakeSplit) { it.lowercase() }
+        assertEquals(listOf("Garfunkel" to 2, "Simon" to 2), artists.map { it.name to it.tracks.size })
     }
 }

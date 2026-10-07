@@ -10,8 +10,9 @@ apps/
   android/    Kotlin / Jetpack Compose app (not started)
 core/
   dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo estimation, crossfade curves
-schemas/      Shared library schema (SQLite) and the track JSON schema used for sync/import
-docs/         Design notes, including where music comes from
+schemas/      Shared library schema (SQLite) and its migrations, the track JSON schema, the genre list
+tools/        Schema checks and the MusicBrainz genre sync
+docs/         Design notes: music sources, metadata, listening history
 ```
 
 ## Principles
