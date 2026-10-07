@@ -90,7 +90,7 @@ Implemented in [`schemas/library.sql`](../schemas/library.sql), with the upgrade
 
 ## Shared code
 
-A new `core/meta` Rust crate (or a module in `core/dsp`, exposed over the same C ABI) owns everything both platforms must agree on:
+`core/dsp/src/meta.rs` owns everything both platforms must agree on. Android calls it through `dsp-jni`; Apple will use the C ABI. Today it strips site names appended to tags (a suffix like " - SiteName" shared by two or more of a track's fields, or a domain) and splits artist credits on commas, semicolons, "feat."/"ft."/"featuring", and "&" when inside a comma list or when both names already appear alone. Planned:
 
 - text normalization (case, Unicode NFKC, diacritics, "The " prefix, feat. stripping), used for `norm_name`, search and the analytics fallback match on artist/title/duration;
 - artist credit splitting;

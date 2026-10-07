@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import app.motif.data.LibraryFilter
 import app.motif.data.Track
 import app.motif.data.albumsOf
+import app.motif.data.artistsOf
 import app.motif.ui.theme.Motif
 
 private enum class Segment(val label: String) { Songs("Songs"), Albums("Albums"), Artists("Artists"), Crates("Crates") }
@@ -70,6 +71,7 @@ fun LibraryScreen(
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val songs = remember(tracks, query) { LibraryFilter(query).let { f -> tracks.filter(f::matches) } }
     val albums = remember(tracks) { albumsOf(tracks) }
+    val artists = remember(tracks) { artistsOf(tracks) }
 
     Column(modifier.nestedScroll(scroll.nestedScrollConnection)) {
         LargeTopAppBar(
@@ -145,13 +147,12 @@ fun LibraryScreen(
                     )
                 }
                 Segment.Artists -> {
-                    val artists = tracks.groupBy { it.artist ?: "Unknown artist" }.toSortedMap(String.CASE_INSENSITIVE_ORDER)
-                    items(artists.entries.toList(), key = { it.key }) { (name, list) ->
+                    items(artists, key = { it.key }) { artist ->
                         ListItem(
-                            headlineContent = { Text(name) },
-                            trailingContent = { Text("${list.size}", color = Motif.secondary) },
+                            headlineContent = { Text(artist.name) },
+                            trailingContent = { Text("${artist.tracks.size}", color = Motif.secondary) },
                             colors = ListItemDefaults.colors(containerColor = Motif.ground),
-                            modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(list, 0) },
+                            modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(artist.tracks, 0) },
                         )
                     }
                 }

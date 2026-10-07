@@ -2,11 +2,12 @@
 //! with the `external fun` declarations there. Analyzer handles are boxed
 //! `Analyzer`s passed to Kotlin as `Long`.
 
-use jni::objects::{JClass, JFloatArray};
-use jni::sys::{jfloat, jfloatArray, jint, jlong};
+use jni::objects::{JClass, JFloatArray, JObject, JObjectArray, JString};
+use jni::sys::{jfloat, jfloatArray, jint, jlong, jobjectArray, jstring};
 use jni::JNIEnv;
 use motif_dsp::analysis::Analyzer;
 use motif_dsp::crossfade::{self, Curve};
+use motif_dsp::meta;
 
 fn float_array(env: &mut JNIEnv, values: &[f32]) -> jfloatArray {
     let Ok(array) = env.new_float_array(values.len() as i32) else { return std::ptr::null_mut() };
@@ -97,4 +98,98 @@ pub extern "system" fn Java_app_motif_dsp_MotifDsp_crossfadeGains(
     let Some(curve) = Curve::from_raw(curve as u32) else { return std::ptr::null_mut() };
     let (a, b) = crossfade::gains(t, curve);
     float_array(&mut env, &[a, b])
+}
+
+// MARK: - Tag cleanup and artist credits (motif_dsp::meta)
+
+fn read_string(env: &mut JNIEnv, s: &JString) -> Option<String> {
+    if s.is_null() {
+        return None;
+    }
+    env.get_string(s).ok().map(Into::into)
+}
+
+/// A Kotlin `Array<String?>`; null elements stay `None`.
+fn read_strings(env: &mut JNIEnv, array: &JObjectArray) -> Vec<Option<String>> {
+    if array.is_null() {
+        return Vec::new();
+    }
+    let len = env.get_array_length(array).unwrap_or(0);
+    (0..len)
+        .map(|i| {
+            let element = env.get_object_array_element(array, i).ok()?;
+            read_string(env, &JString::from(element))
+        })
+        .collect()
+}
+
+fn new_string(env: &mut JNIEnv, s: &str) -> jstring {
+    env.new_string(s).map_or(std::ptr::null_mut(), JString::into_raw)
+}
+
+fn new_strings(env: &mut JNIEnv, values: &[&str]) -> jobjectArray {
+    let Ok(array) = env.new_object_array(values.len() as i32, "java/lang/String", JObject::null()) else {
+        return std::ptr::null_mut();
+    };
+    for (i, value) in values.iter().enumerate() {
+        let Ok(s) = env.new_string(value) else { return std::ptr::null_mut() };
+        if env.set_object_array_element(&array, i as i32, s).is_err() {
+            return std::ptr::null_mut();
+        }
+    }
+    array.into_raw()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_metaCleanerVersion(_env: JNIEnv, _class: JClass) -> jint {
+    meta::CLEANER_VERSION as jint
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_metaNorm(mut env: JNIEnv, _class: JClass, text: JString) -> jstring {
+    let text = read_string(&mut env, &text).unwrap_or_default();
+    new_string(&mut env, &meta::norm(&text))
+}
+
+/// A site name appended to several of a track's fields, or null.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_metaDetectSiteSuffix(
+    mut env: JNIEnv,
+    _class: JClass,
+    fields: JObjectArray,
+) -> jstring {
+    let fields = read_strings(&mut env, &fields);
+    let refs: Vec<Option<&str>> = fields.iter().map(Option::as_deref).collect();
+    match meta::detect_site_suffix(&refs) {
+        Some(suffix) => new_string(&mut env, &suffix),
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_metaCleanField(
+    mut env: JNIEnv,
+    _class: JClass,
+    text: JString,
+    suffixes: JObjectArray,
+) -> jstring {
+    let text = read_string(&mut env, &text).unwrap_or_default();
+    let suffixes: Vec<String> = read_strings(&mut env, &suffixes).into_iter().flatten().collect();
+    new_string(&mut env, &meta::clean_field(&text, &suffixes))
+}
+
+/// Credited artists as [name, role, name, role, ...]. `known` holds names
+/// already normalized with metaNorm.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_metaSplitArtists(
+    mut env: JNIEnv,
+    _class: JClass,
+    credit: JString,
+    known: JObjectArray,
+) -> jobjectArray {
+    let credit = read_string(&mut env, &credit).unwrap_or_default();
+    let known: Vec<String> = read_strings(&mut env, &known).into_iter().flatten().collect();
+    let credits = meta::split_artists(&credit, &known);
+    let flat: Vec<&str> = credits.iter().flat_map(|c| [c.name.as_str(), c.role.as_str()]).collect();
+    new_strings(&mut env, &flat)
 }
