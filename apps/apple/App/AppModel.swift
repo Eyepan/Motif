@@ -106,7 +106,7 @@ final class AppModel {
     /// Albums by title, compared without case or extra whitespace, so a soundtrack whose
     /// songs credit different singers stays one album. Its artist is the album artist or the
     /// artist every track shares, else "Various artists".
-    static func albums(of tracks: [Track], artwork: ArtworkStore? = nil) -> [AlbumGroup] {
+    nonisolated static func albums(of tracks: [Track], artwork: ArtworkStore? = nil) -> [AlbumGroup] {
         var order: [String] = []
         var groups: [String: [Track]] = [:]
         for t in tracks {
@@ -131,7 +131,7 @@ final class AppModel {
 
     /// Unicode-normalized, single-spaced, case-folded. Combining marks are kept:
     /// in scripts like Tamil they are vowels, not accents.
-    static func albumKey(_ text: String) -> String {
+    nonisolated static func albumKey(_ text: String) -> String {
         text.precomposedStringWithCompatibilityMapping
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
             .lowercased()
@@ -139,7 +139,7 @@ final class AppModel {
 
     /// A track counts for each credited artist, primary or featured, so "A, B feat. C"
     /// lists the song under A, B and C. "A & B" splits only when both names also appear alone.
-    static func artists(of tracks: [Track]) -> [ArtistGroup] {
+    nonisolated static func artists(of tracks: [Track]) -> [ArtistGroup] {
         let credited = tracks.filter { !($0.artist ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         let credits = credited.map { TagCleaner.splitArtists($0.artist!, known: [String]()) }
         let known = Set(credits.flatMap { $0.map { TagCleaner.norm($0.name) } })
