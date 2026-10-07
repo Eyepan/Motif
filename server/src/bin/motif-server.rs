@@ -3,7 +3,7 @@
 //!     motif-server            serve on $PORT (default 8080)
 //!     motif-server migrate    apply migrations/ to DATABASE_URL_UNPOOLED or DATABASE_URL
 
-use motif_server::{AppState, Config, MIGRATOR, router, telemetry};
+use motif_server::{AppState, Config, router, telemetry};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -33,13 +33,7 @@ async fn serve() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 async fn migrate() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Migrations take a session-level advisory lock, which a transaction-mode
-    // pooler does not keep; use the direct connection when there is one.
-    let url = std::env::var("DATABASE_URL_UNPOOLED")
-        .or_else(|_| std::env::var("DATABASE_URL"))
-        .map_err(|_| "DATABASE_URL is not set")?;
-    let pool = sqlx::PgPool::connect(&url).await?;
-    MIGRATOR.run(&pool).await?;
+    motif_server::migrate().await?;
     tracing::info!("migrations applied");
     Ok(())
 }

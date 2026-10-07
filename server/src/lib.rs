@@ -21,6 +21,28 @@ pub use config::Config;
 
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+/// Applies pending migrations over a direct connection. Migrations hold a
+/// session-level advisory lock, which a transaction-mode pooler does not keep,
+/// so this prefers DATABASE_URL_UNPOOLED. Concurrent callers wait on that lock
+/// and then find nothing left to apply.
+pub async fn migrate() -> Result<(), String> {
+    let url = std::env::var("DATABASE_URL_UNPOOLED")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .map_err(|_| "DATABASE_URL is not set".to_string())?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(10))
+        .connect(&url)
+        .await
+        .map_err(|e| format!("database connection failed: {e}"))?;
+    let result = MIGRATOR
+        .run(&pool)
+        .await
+        .map_err(|e| format!("migration failed: {e}"));
+    pool.close().await;
+    result
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,

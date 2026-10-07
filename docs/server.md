@@ -19,7 +19,7 @@ It does not store or stream audio. Files stay on each device. Syncing audio thro
 | Language | Rust, axum 0.8, tokio | Same language as `core/`; future `core/recap` code can run on the server unchanged |
 | Database | Postgres via sqlx (runtime queries, no compile-time DB needed) | Relational data plus `jsonb` payloads; Neon on Vercel |
 | Hosting | One Vercel Function using the Rust runtime (`vercel_runtime` 2 with its axum adapter) | Push-to-deploy, preview URL per PR, no servers to run |
-| Migrations | `sqlx` migrations embedded in the binary, run by `motif-server migrate` | Applied by a GitHub Action, never on a cold start |
+| Migrations | `sqlx` migrations embedded in the binary | Applied by each function instance on cold start, and by `motif-server migrate` elsewhere |
 | Contract | `schemas/api/openapi.yaml` | Shared by the Apple and Android clients like the other schemas |
 
 The same axum router is built into two binaries: `api/motif.rs` (the Vercel Function) and `motif-server` (a plain HTTP server for local development, tests, and hosting anywhere else). Nothing in the handlers knows about Vercel, so moving to Fly, Railway, a container or a home server later is a build-target change, not a rewrite.
@@ -45,9 +45,9 @@ Supabase and other Postgres hosts work the same way: anything with a pooled and 
 
 ### Deploying
 
-The project owner does this once (steps in `server/README.md`): import the repo in Vercel with Root Directory `server`, connect Neon, set `MOTIF_JWT_SECRET`, and add the direct database URL as the `MOTIF_DATABASE_URL` GitHub secret. After that, merging to `main` deploys production and the **Server migrations** workflow applies new migrations.
+The project owner does this once (steps in `server/README.md`): import the repo in Vercel with Root Directory `server`, connect Neon, and set `MOTIF_JWT_SECRET`. After that, merging to `main` deploys production and every PR gets a preview. Each function instance applies pending migrations when it starts, so a new deployment, or a fresh Neon preview branch, never serves against an old schema. Concurrent cold starts wait on the migrator's advisory lock; when nothing is pending the check is a single query. `MOTIF_MIGRATE_ON_START=0` turns it off.
 
-Vercel deploys the new code while the workflow migrates, so for a short time old code runs on the new schema and possibly new code on the old one. Migrations therefore stay additive: add a column or table in one release, start using it, and remove the old one in a later release.
+During a rollout, instances of the previous deployment keep serving after the new one has migrated, so for a short time old code runs on the new schema and possibly new code on the old one. Migrations therefore stay additive: add a column or table in one release, start using it, and remove the old one in a later release.
 
 ## API
 

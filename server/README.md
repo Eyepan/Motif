@@ -37,6 +37,5 @@ One-time setup, done by the project owner:
 1. Import the GitHub repo in Vercel and set **Root Directory** to `server`. Vercel detects the Rust runtime from `Cargo.toml` and `api/motif.rs`.
 2. Add **Neon** (Free plan) from the Vercel Marketplace (Storage tab), choose region **AWS Asia Pacific (Singapore)**, and connect it to the project. It sets `DATABASE_URL` and `DATABASE_URL_UNPOOLED`. The function runs in Vercel's Singapore region (`sin1` in `vercel.json`), next to the database. Optionally turn on the integration's preview branches, with automatic deletion of obsolete branches.
 3. Set `MOTIF_JWT_SECRET`. Leave `MOTIF_DEV_AUTH` unset (the server refuses to start with it on in production). `MOTIF_APPLE_AUDIENCES` and `MOTIF_GOOGLE_CLIENT_IDS` stay empty unless Apple or Google sign-in is added later.
-4. Add `DATABASE_URL_UNPOOLED` as a GitHub Actions secret named `MOTIF_DATABASE_URL` so the **Server migrations** workflow can migrate on merge.
 
-Every push to `main` then deploys production and every PR gets a preview URL. The same binary also runs anywhere else: `cargo build --release --bin motif-server` and run it with the same environment.
+Migrations apply automatically when a deployment starts. Every push to `main` then deploys production and every PR gets a preview URL. The same binary also runs anywhere else: `cargo build --release --bin motif-server` and run it with the same environment.
