@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Media files are large and re-importable; back up only the library database and settings. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="media/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="media/" />
+    </device-transfer>
+</data-extraction-rules>
