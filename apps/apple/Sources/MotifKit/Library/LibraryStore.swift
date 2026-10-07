@@ -77,10 +77,14 @@ public actor LibraryStore {
     /// Bytes in `Track.waveform`.
     public static let waveformLength = 128
 
-    private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at"
+    private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at, album_artist"
 
     /// Where imported audio files live. Track.filePath is relative to this.
     public nonisolated let mediaDirectory: URL
+    /// Album art, one file per track.
+    public nonisolated let artwork: ArtworkStore
+    /// Site names appended to tags anywhere in the library (see `TagCleaner`), filled by `prepareTagCleaning`.
+    public private(set) var siteSuffixes: Set<String> = []
     /// Only touched from actor-isolated code and from deinit, which has exclusive access.
     private nonisolated(unsafe) let db: OpaquePointer
 
@@ -95,10 +99,11 @@ public actor LibraryStore {
 
     /// Pass `nil` for an in-memory database (tests).
     public init(directory: URL?) throws {
-        let media = (directory ?? FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
-            .appending(path: "Media", directoryHint: .isDirectory)
+        let base = directory ?? FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let media = base.appending(path: "Media", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: media, withIntermediateDirectories: true)
         mediaDirectory = media
+        artwork = try ArtworkStore(directory: base.appending(path: "Artwork", directoryHint: .isDirectory))
 
         let path = directory.map { $0.appending(path: "library.sqlite").path(percentEncoded: false) } ?? ":memory:"
         var handle: OpaquePointer?
@@ -158,7 +163,7 @@ public actor LibraryStore {
     /// row, which would cascade to its tags, credits and genres and null every
     /// column `Track` doesn't carry.
     public func upsert(_ t: Track) throws {
-        let placeholders = (1...18).map { "?\($0)" }.joined(separator: ", ")
+        let placeholders = (1...19).map { "?\($0)" }.joined(separator: ", ")
         let updates = Self.columns.split(separator: ", ").dropFirst().map { "\($0) = excluded.\($0)" }.joined(separator: ", ")
         try run(
             "INSERT INTO tracks (\(Self.columns)) VALUES (\(placeholders)) ON CONFLICT(id) DO UPDATE SET \(updates)",
@@ -166,15 +171,80 @@ public actor LibraryStore {
                 t.id.uuidString, t.title, t.artist, t.album, t.durationMs, t.filePath, t.format,
                 t.sampleRate, t.bitDepth, t.channels, t.source.rawValue, t.sourceRef,
                 t.licenseURL?.absoluteString, t.bpm, t.loudnessDb, t.musicalKey, t.waveform.map { Data($0) },
-                Int(t.addedAt.timeIntervalSince1970),
+                Int(t.addedAt.timeIntervalSince1970), t.albumArtist,
             ]
         )
     }
 
-    /// Removes the row and its audio file.
+    /// Adds a newly imported track and the raw tags its cleaned values came from, in one transaction.
+    public func insert(_ track: Track, raw: RawTags?) throws {
+        try Self.exec(db, "BEGIN")
+        do {
+            try upsert(track)
+            if let raw { try insertRawTags(raw, for: track.id) }
+            try Self.exec(db, "COMMIT")
+        } catch {
+            try? Self.exec(db, "ROLLBACK")
+            throw error
+        }
+        if let raw, let suffix = TagCleaner.siteSuffix(raw) { siteSuffixes.insert(suffix) }
+    }
+
+    private func insertRawTags(_ raw: RawTags, for id: UUID) throws {
+        for entry in raw.entries {
+            try run("INSERT INTO track_tags (track_id, key, value, origin) VALUES (?1, ?2, ?3, 'tag')",
+                    bind: [id.uuidString, entry.key, entry.value])
+        }
+    }
+
+    /// Collects site suffixes from every track's raw tags and, when the shared
+    /// cleanup rules changed since `previousVersion` (0 = never ran), re-cleans
+    /// title, artist, album and album artist from those raw tags. Tracks
+    /// imported before raw tags were kept use their current values as raw.
+    /// Returns the cleaner version the library is now at.
+    @discardableResult
+    public func prepareTagCleaning(previousVersion: Int) throws -> Int {
+        var raw: [String: [String: String]] = [:]
+        for row in try strings("SELECT track_id, key, value FROM track_tags WHERE origin = 'tag'") {
+            guard let id = row[0], let key = row[1], let value = row[2] else { continue }
+            raw[id, default: [:]][key] = value
+        }
+        let version = TagCleaner.version
+        let stale = previousVersion < version
+        let tracks = try stale ? allTracks() : []
+        let tags = Dictionary(uniqueKeysWithValues: tracks.map { t in
+            (t.id, raw[t.id.uuidString].map(RawTags.init(entries:))
+                ?? RawTags(title: t.title, artist: t.artist, album: t.album, albumArtist: t.albumArtist))
+        })
+        siteSuffixes = Set((raw.values.map(RawTags.init(entries:)) + tags.values).compactMap(TagCleaner.siteSuffix))
+        guard stale else { return version }
+
+        try Self.exec(db, "BEGIN")
+        do {
+            for t in tracks {
+                guard let r = tags[t.id] else { continue }
+                if raw[t.id.uuidString] == nil { try insertRawTags(r, for: t.id) }
+                let albumArtist = TagCleaner.clean(r.albumArtist, suffixes: siteSuffixes)
+                try run(
+                    "UPDATE tracks SET title = ?1, artist = ?2, album = ?3, album_artist = ?4 WHERE id = ?5",
+                    bind: [TagCleaner.clean(r.title, suffixes: siteSuffixes) ?? t.title,
+                           TagCleaner.clean(r.artist, suffixes: siteSuffixes) ?? albumArtist,
+                           TagCleaner.clean(r.album, suffixes: siteSuffixes), albumArtist, t.id.uuidString]
+                )
+            }
+            try Self.exec(db, "COMMIT")
+        } catch {
+            try? Self.exec(db, "ROLLBACK")
+            throw error
+        }
+        return version
+    }
+
+    /// Removes the row, its audio file and its art.
     public func delete(_ track: Track) throws {
         try run("DELETE FROM tracks WHERE id = ?1", bind: [track.id.uuidString])
         try? FileManager.default.removeItem(at: url(for: track))
+        artwork.delete(track.id)
     }
 
     public func updateAnalysis(id: UUID, _ analysis: TrackAnalysis) throws {
@@ -223,6 +293,22 @@ public actor LibraryStore {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw lastError() }
     }
 
+    /// Rows of text columns, for queries that aren't tracks.
+    private func strings(_ sql: String, bind values: [(any Sendable)?] = []) throws -> [[String?]] {
+        let stmt = try prepare(sql, bind: values)
+        defer { sqlite3_finalize(stmt) }
+        var rows: [[String?]] = []
+        while true {
+            let rc = sqlite3_step(stmt)
+            if rc == SQLITE_DONE { break }
+            guard rc == SQLITE_ROW else { throw lastError() }
+            rows.append((0..<sqlite3_column_count(stmt)).map { i in
+                sqlite3_column_type(stmt, i) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, i))
+            })
+        }
+        return rows
+    }
+
     private func query(_ sql: String, bind values: [(any Sendable)?] = []) throws -> [Track] {
         let stmt = try prepare(sql, bind: values)
         defer { sqlite3_finalize(stmt) }
@@ -268,7 +354,8 @@ public actor LibraryStore {
             loudnessDb: double(14),
             musicalKey: text(15),
             waveform: bytes(16),
-            addedAt: Date(timeIntervalSince1970: TimeInterval(int(17) ?? 0))
+            addedAt: Date(timeIntervalSince1970: TimeInterval(int(17) ?? 0)),
+            albumArtist: text(18)
         )
     }
 

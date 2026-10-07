@@ -36,6 +36,19 @@ void motif_analyzer_free(MotifAnalyzer *analyzer);
 // Gains for outgoing (a) and incoming (b) decks at fade position t in [0, 1].
 int32_t motif_crossfade_gains(float t, uint32_t curve, float *out_a, float *out_b);
 
+// Tag cleanup and artist credits (core/dsp/src/meta.rs). Strings are UTF-8;
+// every returned string is the caller's and is freed with motif_string_free.
+// Lists are `count` pointers, each NULL for a missing value.
+uint32_t motif_meta_cleaner_version(void);
+void motif_string_free(char *text);
+char *motif_meta_norm(const char *text);
+// Title, artist, album, album artist in; the site name appended to them, or NULL.
+char *motif_meta_detect_site_suffix(const char *const *fields, size_t count);
+char *motif_meta_clean_field(const char *text, const char *const *suffixes, size_t count);
+// One credited artist per line, "role\tname", role "primary" or "featured".
+// `known` holds names already passed through motif_meta_norm.
+char *motif_meta_split_artists(const char *credit, const char *const *known, size_t count);
+
 #ifdef __cplusplus
 }
 #endif

@@ -106,20 +106,56 @@ func formatTime(_ seconds: TimeInterval) -> String {
     return String(format: "%d:%02d", s / 60, s % 60)
 }
 
-/// Flat colour tile with the title's first letter, standing in for album art.
+/// Album art, or a flat colour tile with the title's first letter when there is none.
 struct ArtTile: View {
     let seed: String
     let letter: String
     var size: CGFloat = 44
     var radius: CGFloat = 6
+    /// The track whose art to show, if it has any.
+    var artwork: UUID?
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.displayScale) private var scale
 
     var body: some View {
         let (bg, fg) = Theme.artColors(for: seed)
+        // Reading the revision redraws the tile when art arrives for a track already on screen.
+        let image = model.artworkRevision >= 0
+            ? artwork.flatMap { model.store.artwork.image(for: $0, maxPixels: Int(size * scale)) } : nil
         RoundedRectangle(cornerRadius: radius)
             .fill(bg)
             .frame(width: size, height: size)
-            .overlay(Text(letter).font(.system(size: size / 2.6, weight: .bold)).foregroundStyle(fg))
+            .overlay {
+                if let image {
+                    Image(decorative: image, scale: scale).resizable().scaledToFill()
+                } else {
+                    Text(letter).font(.system(size: size / 2.6, weight: .bold)).foregroundStyle(fg)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: radius))
             .accessibilityHidden(true)
+    }
+}
+
+/// BPM or key in its colour; boxed when it mixes well with what's playing.
+struct MixValue: View {
+    let text: String
+    let color: Color
+    var match = false
+
+    var body: some View {
+        Text(text)
+            .font(Theme.mono(12, weight: match ? .bold : .regular))
+            .foregroundStyle(color)
+            .padding(.horizontal, match ? 4 : 0)
+            .background {
+                if match {
+                    RoundedRectangle(cornerRadius: 3).fill(color.opacity(0.14))
+                    RoundedRectangle(cornerRadius: 3).stroke(color, lineWidth: 1)
+                }
+            }
+            .accessibilityLabel(match ? "\(text), mixes well" : text)
     }
 }
 

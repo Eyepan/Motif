@@ -27,7 +27,7 @@ struct PhoneLibraryView: View {
                             HStack(alignment: .top, spacing: 12) {
                                 ForEach(model.albums.prefix(10)) { album in
                                     Button { model.player.play(album.tracks) } label: {
-                                        AlbumTile(title: album.title, artist: album.artist, letter: album.tracks[0].monogram)
+                                        AlbumTile(title: album.title, artist: album.artist, letter: album.tracks[0].monogram, artwork: album.artwork)
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -58,7 +58,7 @@ struct PhoneLibraryView: View {
                 ForEach(model.albums) { album in
                     Button { model.player.play(album.tracks) } label: {
                         HStack(spacing: 12) {
-                            ArtTile(seed: album.title, letter: album.tracks[0].monogram, size: 56, radius: 8)
+                            ArtTile(seed: album.title, letter: album.tracks[0].monogram, size: 56, radius: 8, artwork: album.artwork)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(album.title).foregroundStyle(Theme.text)
                                 Text("\(album.artist ?? "Unknown artist") · \(album.tracks.count) songs")
@@ -129,10 +129,11 @@ struct AlbumTile: View {
     let title: String
     let artist: String?
     let letter: String
+    var artwork: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ArtTile(seed: title, letter: letter, size: 132, radius: 10)
+            ArtTile(seed: title, letter: letter, size: 132, radius: 10, artwork: artwork)
             Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.text)
             if let artist { Text(artist).font(.system(size: 12)).foregroundStyle(Theme.secondary) }
         }
@@ -147,7 +148,7 @@ struct TrackRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ArtTile(seed: track.artSeed, letter: track.monogram)
+            ArtTile(seed: track.artSeed, letter: track.monogram, artwork: track.id)
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
                     .font(.system(size: 16))

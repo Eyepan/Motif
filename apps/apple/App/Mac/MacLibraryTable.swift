@@ -10,7 +10,10 @@ struct MacLibraryTable: View {
         var id: UUID { track.id }
     }
 
-    let item: SidebarItem
+    let title: String
+    /// Tracks to list, or nil for the whole library.
+    var tracks: [Track]?
+    var newestFirst = false
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var sortOrder: [KeyPathComparator<Row>] = []
@@ -18,14 +21,15 @@ struct MacLibraryTable: View {
     @State private var importing = false
 
     private var rows: [Row] {
-        var tracks = model.tracks(matching: query)
-        switch item {
-        case .albums: tracks.sort { ($0.sortAlbum, $0.sortTitle) < ($1.sortAlbum, $1.sortTitle) }
-        case .artists: tracks.sort { ($0.sortArtist, $0.sortAlbum, $0.sortTitle) < ($1.sortArtist, $1.sortAlbum, $1.sortTitle) }
-        case .recent: tracks.sort { $0.addedAt > $1.addedAt }
-        case .songs, .catalogs: break
+        var list: [Track]
+        if let tracks {
+            let filter = LibraryFilter(query)
+            list = filter.isEmpty ? tracks : tracks.filter(filter.matches)
+        } else {
+            list = model.tracks(matching: query)
         }
-        let numbered = tracks.enumerated().map { Row(number: $0.offset + 1, track: $0.element) }
+        if newestFirst { list.sort { $0.addedAt > $1.addedAt } }
+        let numbered = list.enumerated().map { Row(number: $0.offset + 1, track: $0.element) }
         return sortOrder.isEmpty ? numbered : numbered.sorted(using: sortOrder)
     }
 
@@ -54,14 +58,14 @@ struct MacLibraryTable: View {
             }
             .width(min: 44, ideal: 54, max: 70)
             TableColumn("BPM", value: \.track.sortBPM) { row in
-                Text(row.track.bpm.map { "\(Int($0.rounded()))" } ?? "—").font(Theme.mono(12))
-                    .foregroundStyle(Theme.bpmColor(row.track.bpm))
+                MixValue(text: row.track.bpm.map { "\(Int($0.rounded()))" } ?? "—",
+                         color: Theme.bpmColor(row.track.bpm), match: matches(row, MixMatch.tempos))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .width(min: 40, ideal: 50, max: 64)
             TableColumn("Key", value: \.track.sortKey) { row in
-                Text(row.track.musicalKey ?? "—").font(Theme.mono(12))
-                    .foregroundStyle(Theme.keyColor(row.track.musicalKey))
+                MixValue(text: row.track.musicalKey ?? "—", color: Theme.keyColor(row.track.musicalKey),
+                         match: matches(row, MixMatch.keys))
             }
             .width(min: 36, ideal: 44, max: 60)
             TableColumn("Format", value: \.track.format) { row in
@@ -91,7 +95,7 @@ struct MacLibraryTable: View {
             }
         }
         .searchable(text: $query, prompt: "Search · try bpm:120-126 key:8A")
-        .navigationTitle(item.title)
+        .navigationTitle(title)
         .navigationSubtitle("\(rows.count) songs · all offline")
         .toolbar {
             if model.activeImportCount > 0 {
@@ -113,6 +117,12 @@ struct MacLibraryTable: View {
             case .failure(let error): model.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    /// Whether the row mixes well into what's playing, by `rule`. The playing track itself isn't marked.
+    private func matches(_ row: Row, _ rule: (Track, Track) -> Bool) -> Bool {
+        guard let current = model.player.current, current.id != row.track.id else { return false }
+        return rule(current, row.track)
     }
 
     private func isCurrent(_ row: Row) -> Bool {

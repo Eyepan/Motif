@@ -79,7 +79,7 @@ struct MiniPlayer: View {
             Button { model.showNowPlaying = true } label: {
                 HStack(spacing: 10) {
                     if let track = player.current {
-                        ArtTile(seed: track.artSeed, letter: track.monogram, size: 44, radius: 8)
+                        ArtTile(seed: track.artSeed, letter: track.monogram, size: 44, radius: 8, artwork: track.id)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(track.title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.text)
                             Text([track.artist, track.shortQualityLabel].compactMap { $0 }.joined(separator: " · "))

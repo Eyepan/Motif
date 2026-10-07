@@ -78,8 +78,11 @@ struct DiscoverView: View {
         downloading.insert(result.id)
         defer { downloading.remove(result.id) }
         do {
-            for file in try await source.downloads(for: result) {
-                try await model.importer.importDownload(file, from: source.id, result: result, analyze: model.analyzeOnImport)
+            let files = try await source.downloads(for: result)
+            let cover = await model.importer.cover(for: result)
+            for file in files {
+                try await model.importer.importDownload(file, from: source.id, result: result,
+                                                        analyze: model.analyzeOnImport, cover: cover)
                 await model.refresh()
             }
             done.insert(result.id)

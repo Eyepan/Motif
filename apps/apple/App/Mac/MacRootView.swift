@@ -41,12 +41,17 @@ struct MacRootView: View {
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } detail: {
-            switch selection ?? .songs {
-            case .catalogs:
-                DiscoverView()
-            case let item:
-                MacLibraryTable(item: item)
+            // A stack per sidebar item, so switching items starts at the top level.
+            NavigationStack {
+                switch selection ?? .songs {
+                case .songs: MacLibraryTable(title: "Songs")
+                case .recent: MacLibraryTable(title: "Recently Added", newestFirst: true)
+                case .albums: MacAlbumGrid()
+                case .artists: MacArtistList()
+                case .catalogs: DiscoverView()
+                }
             }
+            .id(selection)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             MacPlayerBar()

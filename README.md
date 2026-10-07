@@ -45,6 +45,11 @@ swift test                        # MotifKit unit tests
 
 Rerun the script after changing anything in `core/dsp`.
 
+Installable builds of the latest `main` are on the `apple-latest` prerelease (built by `.github/workflows/apple.yml`):
+
+- **Mac:** `Motif-<n>.dmg`, a universal app that is ad-hoc signed, not notarized. Drag it to Applications, then allow the first launch in System Settings › Privacy & Security (Open Anyway), or run `xattr -dr com.apple.quarantine /Applications/Motif.app`.
+- **iPhone:** `Motif-<n>.ipa`, unsigned. Install it with Sideloadly, which signs it with your Apple ID (a free Apple ID needs a re-sign every 7 days).
+
 Server (any platform with Rust and Postgres): see [server/README.md](server/README.md).
 
 ## Music sources
