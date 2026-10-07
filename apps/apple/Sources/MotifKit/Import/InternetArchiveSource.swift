@@ -23,7 +23,8 @@ public struct InternetArchiveSource: MusicSource {
         return response.response.docs.map {
             SourceResult(id: $0.identifier, title: $0.title?.first ?? $0.identifier,
                          artist: $0.creator?.first, album: $0.title?.first,
-                         licenseURL: $0.licenseurl?.first.flatMap(URL.init(string:)))
+                         licenseURL: $0.licenseurl?.first.flatMap(URL.init(string:)),
+                         coverURL: URL(string: "https://archive.org/services/img/")?.appending(path: $0.identifier))
         }
     }
 

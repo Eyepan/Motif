@@ -48,3 +48,19 @@ public extension Track {
         return ["\(n)\(letter)", "\(up)\(letter)", "\(down)\(letter)", "\(n)\(other)"]
     }
 }
+
+/// Whether two tracks mix well, for highlighting matches in lists. The rule is
+/// shared across apps in `schemas/mix-colours.json`.
+public enum MixMatch {
+    /// `incoming`'s key is the same as `outgoing`'s, a wheel neighbour, or its relative major/minor.
+    public static func keys(_ outgoing: Track, _ incoming: Track) -> Bool {
+        incoming.musicalKey.map { outgoing.compatibleKeys.contains($0.uppercased()) } ?? false
+    }
+
+    /// `incoming` can be beatmatched to `outgoing` within `PlaybackEngine.maxTempoAdjust`,
+    /// counting half and double time.
+    public static func tempos(_ outgoing: Track, _ incoming: Track) -> Bool {
+        guard let a = outgoing.bpm, let b = incoming.bpm, a > 0, b > 0 else { return false }
+        return [a / b, a * 2 / b, a / (2 * b)].contains { abs($0 - 1) <= PlaybackEngine.maxTempoAdjust }
+    }
+}

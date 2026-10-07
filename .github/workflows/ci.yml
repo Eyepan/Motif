@@ -6,7 +6,7 @@ on:
 
 jobs:
   # Each job below runs only when something it builds changed. Skipped jobs count as passing,
-  # so they don't hold up merges.
+  # so they don't hold up merges. The Apple builds live in apple.yml.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -16,7 +16,6 @@ jobs:
       schemas: ${{ steps.filter.outputs.schemas }}
       dsp: ${{ steps.filter.outputs.dsp }}
       server: ${{ steps.filter.outputs.server }}
-      apple: ${{ steps.filter.outputs.apple }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -33,11 +32,6 @@ jobs:
             server:
               - 'server/**'
               - 'schemas/api/**'
-              - '.github/workflows/ci.yml'
-            apple:
-              - 'apps/apple/**'
-              - 'core/**'
-              - 'schemas/**'
               - '.github/workflows/ci.yml'
 
   schemas:
@@ -97,26 +91,3 @@ jobs:
         run: |
           rustup toolchain install 1.92 --profile minimal
           cargo +1.92 build --release --locked --bin motif
-
-  apple:
-    needs: changes
-    if: needs.changes.outputs.apple == 'true'
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build MotifDSP.xcframework
-        run: core/dsp/scripts/build-apple.sh
-      - name: MotifKit tests
-        working-directory: apps/apple
-        run: swift test
-      - name: Generate Xcode project
-        working-directory: apps/apple
-        run: |
-          brew install xcodegen
-          xcodegen
-      - name: Build app for macOS
-        working-directory: apps/apple
-        run: xcodebuild build -project Motif.xcodeproj -scheme Motif -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO
-      - name: Build app for iOS Simulator
-        working-directory: apps/apple
-        run: xcodebuild build -project Motif.xcodeproj -scheme Motif -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO

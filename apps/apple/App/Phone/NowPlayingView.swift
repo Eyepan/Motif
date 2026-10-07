@@ -30,7 +30,7 @@ struct NowPlayingView: View {
             .foregroundStyle(Theme.badge)
 
             if let track = player.current {
-                ArtTile(seed: track.artSeed, letter: track.monogram, size: 334, radius: 14)
+                ArtTile(seed: track.artSeed, letter: track.monogram, size: 334, radius: 14, artwork: track.id)
                     .shadow(color: .black.opacity(0.55), radius: 30, y: 24)
                     .scaleEffect(player.state == .playing ? 1 : 0.86)
                     .animation(.easeOut(duration: 0.35), value: player.state)

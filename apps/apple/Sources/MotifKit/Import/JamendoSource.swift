@@ -46,10 +46,12 @@ public struct JamendoSource: MusicSource {
             let audiodownload: String
             let audiodownload_allowed: Bool
             let license_ccurl: String?
+            let album_image: String?
 
             var result: SourceResult {
                 SourceResult(id: id, title: name, artist: artist_name, album: album_name,
-                             licenseURL: license_ccurl.flatMap(URL.init(string:)))
+                             licenseURL: license_ccurl.flatMap(URL.init(string:)),
+                             coverURL: album_image.flatMap(URL.init(string:)))
             }
         }
         let results: [Track]

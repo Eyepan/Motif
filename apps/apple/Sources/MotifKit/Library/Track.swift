@@ -30,20 +30,22 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
     /// Loudness overview for drawing, `LibraryStore.waveformLength` bytes. Local cache, not synced.
     public var waveform: [UInt8]?
     public var addedAt: Date
+    /// The album's credited artist (TPE2 / ALBUMARTIST), when tagged.
+    public var albumArtist: String?
 
     public init(
         id: UUID = UUID(), title: String, artist: String? = nil, album: String? = nil,
         durationMs: Int, filePath: String, format: String, sampleRate: Int? = nil,
         bitDepth: Int? = nil, channels: Int? = nil, source: Source, sourceRef: String? = nil,
         licenseURL: URL? = nil, bpm: Double? = nil, loudnessDb: Double? = nil, musicalKey: String? = nil,
-        waveform: [UInt8]? = nil, addedAt: Date = .now
+        waveform: [UInt8]? = nil, addedAt: Date = .now, albumArtist: String? = nil
     ) {
         self.id = id; self.title = title; self.artist = artist; self.album = album
         self.durationMs = durationMs; self.filePath = filePath; self.format = format
         self.sampleRate = sampleRate; self.bitDepth = bitDepth; self.channels = channels
         self.source = source; self.sourceRef = sourceRef; self.licenseURL = licenseURL
         self.bpm = bpm; self.loudnessDb = loudnessDb; self.musicalKey = musicalKey
-        self.waveform = waveform; self.addedAt = addedAt
+        self.waveform = waveform; self.addedAt = addedAt; self.albumArtist = albumArtist
     }
 
     public var isLossless: Bool { ["flac", "wav", "alac", "aiff"].contains(format) }

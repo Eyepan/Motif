@@ -1,0 +1,102 @@
+name: Apple
+on:
+  push:
+    branches: [main]
+    paths: [apps/apple/**, core/dsp/**, schemas/**, .github/workflows/apple.yml]
+  pull_request:
+    paths: [apps/apple/**, core/dsp/**, schemas/**, .github/workflows/apple.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # updates the apple-latest prerelease on main
+
+jobs:
+  build:
+    name: macOS and iOS builds
+    runs-on: macos-15
+    env:
+      BUILD: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core/dsp
+      - name: Build MotifDSP.xcframework
+        run: core/dsp/scripts/build-apple.sh
+      # PRs already ran the tests, and main only accepts PRs, so pushes to main just build and publish.
+      - name: MotifKit tests
+        if: github.event_name != 'push'
+        working-directory: apps/apple
+        run: swift test
+      - name: Generate Xcode project
+        working-directory: apps/apple
+        run: |
+          brew install xcodegen
+          xcodegen
+
+      # Ad-hoc signed ("Sign to Run Locally"): no Apple developer account needed, so
+      # Gatekeeper asks once on first open. Universal (Apple silicon and Intel).
+      - name: Build Mac app
+        working-directory: apps/apple
+        run: |
+          xcodebuild build -project Motif.xcodeproj -scheme Motif -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build/mac \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            CURRENT_PROJECT_VERSION="$BUILD" > "$RUNNER_TEMP/mac.log" 2>&1 \
+            || { grep -E 'error:' "$RUNNER_TEMP/mac.log" | head -50; tail -n 40 "$RUNNER_TEMP/mac.log"; exit 1; }
+          APP=build/mac/Build/Products/Release/Motif.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -d --entitlements - "$APP"
+          lipo -archs "$APP/Contents/MacOS/Motif"
+      - name: Package .dmg
+        working-directory: apps/apple
+        run: |
+          mkdir -p dist/dmg
+          cp -R build/mac/Build/Products/Release/Motif.app dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          # hdiutil sometimes reports "Resource busy" on hosted runners; retry.
+          for attempt in 1 2 3; do
+            hdiutil create -volname Motif -srcfolder dist/dmg -ov -format UDZO "dist/Motif-$BUILD.dmg" && break
+            sleep 5
+          done
+          test -f "dist/Motif-$BUILD.dmg"
+
+      # Unsigned: Sideloadly (or AltStore) signs it with your Apple ID when installing.
+      - name: Build iPhone app (.ipa)
+        working-directory: apps/apple
+        run: |
+          xcodebuild build -project Motif.xcodeproj -scheme Motif -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CURRENT_PROJECT_VERSION="$BUILD" > "$RUNNER_TEMP/ios.log" 2>&1 \
+            || { grep -E 'error:' "$RUNNER_TEMP/ios.log" | head -50; tail -n 40 "$RUNNER_TEMP/ios.log"; exit 1; }
+          mkdir -p dist/ipa/Payload
+          cp -R build/ios/Build/Products/Release-iphoneos/Motif.app dist/ipa/Payload/
+          (cd dist/ipa && zip -qry "../Motif-$BUILD.ipa" Payload)
+          unzip -l "dist/Motif-$BUILD.ipa" | grep -q 'Payload/Motif.app/Motif$'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: motif-apple-${{ github.run_number }}
+          path: |
+            apps/apple/dist/Motif-${{ github.run_number }}.dmg
+            apps/apple/dist/Motif-${{ github.run_number }}.ipa
+          if-no-files-found: error
+      - name: Publish apple-latest prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: apps/apple/dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<NOTES
+          Release build of $GITHUB_SHA.
+
+          **Mac (.dmg)**: open it and drag Motif to Applications. It's ad-hoc signed, not notarized, so the first launch is blocked. Either open System Settings › Privacy & Security and click **Open Anyway** next to Motif, or run \`xattr -dr com.apple.quarantine /Applications/Motif.app\` in Terminal. On macOS 14 you can also right-click Motif and choose Open.
+
+          **iPhone (.ipa)**: unsigned. Install it with Sideloadly using your Apple ID; with a free Apple ID it has to be re-signed every 7 days.
+          NOTES
+          gh release delete apple-latest --yes --cleanup-tag || true
+          gh release create apple-latest "Motif-$BUILD.dmg" "Motif-$BUILD.ipa" \
+            --prerelease --target "$GITHUB_SHA" \
+            --title "Motif for Mac and iPhone (latest main)" \
+            --notes-file notes.md

@@ -26,7 +26,8 @@ struct MotifApp: App {
             .tint(Theme.accent)
             .preferredColorScheme(.dark)
             .task {
-                await model.refresh()
+                await model.load()
+                await model.backfillArtwork()
                 await model.analyzeMissing()
             }
             .alert("Something went wrong", isPresented: Binding(
