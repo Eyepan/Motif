@@ -2,6 +2,7 @@ package app.motif
 
 import android.app.Application
 import android.content.Context
+import app.motif.data.ArtworkStore
 import app.motif.data.LibraryStore
 import app.motif.data.Track
 import app.motif.importer.Importer
@@ -19,7 +20,17 @@ class MotifApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val prefs by lazy { getSharedPreferences("motif", Context.MODE_PRIVATE) }
 
-    val library by lazy { LibraryStore(this).also { scope.launch { it.load() } } }
+    val library by lazy {
+        LibraryStore(this).also { store ->
+            scope.launch {
+                store.load()
+                // Art for tracks imported before it was extracted.
+                artwork.sync(store.tracks.value, store::fileFor)
+            }
+        }
+    }
+
+    val artwork by lazy { ArtworkStore(filesDir) }
 
     private val _analyzeOnImport by lazy { MutableStateFlow(prefs.getBoolean(KEY_ANALYZE, true)) }
     val analyzeOnImport: StateFlow<Boolean> get() = _analyzeOnImport.asStateFlow()
@@ -29,17 +40,20 @@ class MotifApp : Application() {
         prefs.edit().putBoolean(KEY_ANALYZE, on).apply()
     }
 
-    val importer by lazy { Importer(this, library, scope) { _analyzeOnImport.value } }
+    val importer by lazy { Importer(this, library, artwork, scope) { _analyzeOnImport.value } }
 
     val playback by lazy {
-        PlaybackEngine(this, library, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
+        PlaybackEngine(this, library, artwork, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
             prefs.edit().putBoolean(KEY_MIX, on).apply()
         }
     }
 
     fun delete(track: Track) {
         playback.remove(track)
-        scope.launch { library.delete(track) }
+        scope.launch {
+            library.delete(track)
+            artwork.delete(track.id)
+        }
     }
 
     private companion object {

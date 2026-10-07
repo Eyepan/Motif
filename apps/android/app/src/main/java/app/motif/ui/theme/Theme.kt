@@ -1,8 +1,10 @@
 package app.motif.ui.theme
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -88,6 +90,9 @@ fun MotifTheme(content: @Composable () -> Unit) {
         typography = base.copy(
             headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold, fontSize = 34.sp),
         ),
-        content = content,
-    )
+    ) {
+        // Text and icons outside a Surface (sheets on custom colours, popups) fall back to
+        // LocalContentColor, which defaults to black; make the fallback the light text colour.
+        CompositionLocalProvider(LocalContentColor provides Motif.text, content = content)
+    }
 }
