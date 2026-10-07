@@ -49,3 +49,50 @@ jobs:
             --prerelease --target "$GITHUB_SHA" \
             --title "Motif for Android (latest main)" \
             --notes "Release build of $GITHUB_SHA, signed with the development key. Open this page on your phone and tap the .apk to install."
+
+  emulator:
+    name: Emulator tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Free disk space for the emulator
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/local/lib/node_modules "$AGENT_TOOLSDIRECTORY/CodeQL" && df -h /
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build DSP core for Android
+        run: ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}" scripts/build-dsp.sh
+      - name: Build app and tests
+        run: ./gradlew --no-daemon assembleDebug assembleDebugAndroidTest
+      - name: Run tests on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          cores: 4
+          disk-size: 4096M
+          disable-animations: true
+          working-directory: apps/android
+          script: scripts/emulator-tests.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-tests-${{ github.run_number }}
+          path: |
+            apps/android/build/emulator-tests
+            apps/android/app/build/reports/androidTests
+            apps/android/app/build/outputs/androidTest-results
+          if-no-files-found: warn
