@@ -1,0 +1,49 @@
+[package]
+name = "motif-server"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Motif sync service: accounts, listening history and library sync"
+
+[lib]
+path = "src/lib.rs"
+
+# Vercel builds one function per [[bin]] whose path is under api/.
+# vercel.json rewrites every request to it, and the axum router does the routing.
+[[bin]]
+name = "motif"
+path = "api/motif.rs"
+
+# The same router as a plain HTTP server, for local development, tests and
+# hosting anywhere that runs a container. Also runs database migrations.
+[[bin]]
+name = "motif-server"
+path = "src/bin/motif-server.rs"
+
+[dependencies]
+axum = "0.8"
+base64 = "0.22"
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs", "use_pem"] }
+rand = "0.9"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "json", "migrate", "derive", "macros"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+vercel_runtime = { version = "2", features = ["axum"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+strip = true

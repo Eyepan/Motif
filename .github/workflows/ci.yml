@@ -24,6 +24,37 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: motif
+          POSTGRES_PASSWORD: motif
+          POSTGRES_DB: motif
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: server
+    env:
+      TEST_DATABASE_URL: postgres://motif:motif@localhost:5432/motif
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            server/target
+          key: server-${{ runner.os }}-${{ hashFiles('server/Cargo.lock') }}
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - name: Release build of the Vercel function
+        run: cargo build --release --locked --bin motif
+
   apple:
     runs-on: macos-15
     steps:
