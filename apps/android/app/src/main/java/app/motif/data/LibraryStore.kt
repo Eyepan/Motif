@@ -22,15 +22,19 @@ class LibraryStore(private val context: Context) {
 
     private val helper = object : SQLiteOpenHelper(context, "library.sqlite", null, SCHEMA_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
-            schemaStatements().forEach(db::execSQL)
+            statements("library.sql").forEach(db::execSQL)
         }
 
+        /** Android shipped at v2, so every step it needs is in schemas/migrations. Runs in one transaction. */
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Android shipped at v2; add steps here when schemas/library.sql changes.
+            for (version in oldVersion + 1..newVersion) {
+                statements("migrations/$version.sql").forEach(db::execSQL)
+            }
         }
 
         override fun onConfigure(db: SQLiteDatabase) {
             db.enableWriteAheadLogging()
+            db.setForeignKeyConstraintsEnabled(true)
         }
     }
 
@@ -72,9 +76,9 @@ class LibraryStore(private val context: Context) {
         }
     }
 
-    /** CREATE statements from library.sql; the PRAGMA is handled by SQLiteOpenHelper's version. */
-    private fun schemaStatements(): List<String> {
-        val sql = context.assets.open("library.sql").bufferedReader().use { it.readText() }
+    /** Statements from a schemas/ asset; the PRAGMA is handled by SQLiteOpenHelper's version. */
+    private fun statements(asset: String): List<String> {
+        val sql = context.assets.open(asset).bufferedReader().use { it.readText() }
         return sql.lines()
             .map { it.substringBefore("--").trimEnd() }
             .joinToString("\n")
@@ -85,7 +89,7 @@ class LibraryStore(private val context: Context) {
 
     companion object {
         /** Matches `PRAGMA user_version` in schemas/library.sql. */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val WAVEFORM_LENGTH = 128
     }
 }

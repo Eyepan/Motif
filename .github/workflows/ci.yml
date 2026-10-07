@@ -5,6 +5,15 @@ on:
   pull_request:
 
 jobs:
+  schemas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # check_migrations.py reads the v2 schema from history
+      - run: python3 tools/check_migrations.py
+      - run: python3 tools/check_genres.py
+
   dsp:
     runs-on: ubuntu-latest
     defaults:

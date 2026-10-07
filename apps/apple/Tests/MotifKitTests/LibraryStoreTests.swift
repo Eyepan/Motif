@@ -57,26 +57,100 @@ import Testing
         #expect(tracks.first?.musicalKey == nil)
     }
 
-    /// The embedded schema must define the same columns as schemas/library.sql.
-    @Test func schemaMatchesSharedDefinition() throws {
-        let shared = URL(filePath: #filePath)
-            .deletingLastPathComponent().appending(path: "../../../../schemas/library.sql").standardized
-        let sql = try String(contentsOf: shared, encoding: .utf8)
-        #expect(try columns(of: sql) == columns(of: LibraryStore.schema))
+    @Test func migratesVersionTwoDatabaseToSharedSchema() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let path = dir.appending(path: "library.sqlite").path(percentEncoded: false)
+        var db: OpaquePointer?
+        sqlite3_open(path, &db)
+        let v2 = """
+        CREATE TABLE tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT, album TEXT,
+            duration_ms INTEGER NOT NULL DEFAULT 0, file_path TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
+            sample_rate INTEGER, bit_depth INTEGER, channels INTEGER, source TEXT NOT NULL, source_ref TEXT,
+            license_url TEXT, bpm REAL, loudness_db REAL, musical_key TEXT, waveform BLOB, added_at INTEGER NOT NULL);
+        CREATE INDEX tracks_artist_album ON tracks(artist, album);
+        CREATE INDEX tracks_added_at ON tracks(added_at DESC);
+        INSERT INTO tracks (id, title, file_path, format, source, musical_key, added_at)
+            VALUES ('\(UUID().uuidString)', 'Two', 'two.flac', 'flac', 'local', '8A', 0);
+        PRAGMA user_version = 2;
+        """
+        #expect(sqlite3_exec(db, v2, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+
+        let tracks = try await LibraryStore(directory: dir).allTracks()
+        #expect(tracks.map(\.musicalKey) == ["8A"])
+
+        sqlite3_open(path, &db)
+        defer { sqlite3_close(db) }
+        let shared = try String(contentsOf: Self.sharedSchema, encoding: .utf8)
+        #expect(try describe(db) == describe(sql: shared))
     }
 
-    private func columns(of sql: String) throws -> [String] {
+    /// A re-upsert (e.g. filling artist from a catalog) must keep the track's
+    /// child rows and the columns `Track` doesn't carry.
+    @Test func upsertUpdatesInPlace() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = try LibraryStore(directory: dir)
+        var track = Track(title: "x", durationMs: 0, filePath: "x.flac", format: "flac", source: .local)
+        try await store.upsert(track)
+
+        var db: OpaquePointer?
+        sqlite3_open(dir.appending(path: "library.sqlite").path(percentEncoded: false), &db)
+        defer { sqlite3_close(db) }
+        let id = track.id.uuidString
+        #expect(sqlite3_exec(db, """
+        UPDATE tracks SET energy = 0.5 WHERE id = '\(id)';
+        INSERT INTO track_genres (track_id, genre_id, provenance) VALUES ('\(id)', 'house', 'tag');
+        """, nil, nil, nil) == SQLITE_OK)
+
+        track.artist = "Someone"
+        try await store.upsert(track)
+        #expect(try await store.allTracks().first?.artist == "Someone")
+        #expect(rows(db, "SELECT count(*) FROM track_genres") == ["1"])
+        #expect(rows(db, "SELECT energy FROM tracks") == ["0.5"])
+    }
+
+    static let sharedSchema = URL(filePath: #filePath)
+        .deletingLastPathComponent().appending(path: "../../../../schemas/library.sql").standardized
+
+    /// The embedded schema must define the same tables, columns and indexes as schemas/library.sql.
+    @Test func schemaMatchesSharedDefinition() throws {
+        let sql = try String(contentsOf: Self.sharedSchema, encoding: .utf8)
+        #expect(try describe(sql: sql) == describe(sql: LibraryStore.schema))
+        #expect(sql.contains("PRAGMA user_version = \(LibraryStore.schemaVersion);"))
+    }
+
+    private func describe(sql: String) throws -> [String] {
         var db: OpaquePointer?
         sqlite3_open(":memory:", &db)
         defer { sqlite3_close(db) }
         #expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
+        return describe(db)
+    }
+
+    /// Every table's columns and every index's columns, in a comparable form.
+    private func describe(_ db: OpaquePointer?) -> [String] {
+        let objects = rows(db, "SELECT type || ' ' || name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
+        return objects.flatMap { object -> [String] in
+            let parts = object.split(separator: " ")
+            let pragma = parts[0] == "table"
+                ? "SELECT name || ' ' || type || ' ' || \"notnull\" || ' ' || pk FROM pragma_table_info('\(parts[1])')"
+                : "SELECT name FROM pragma_index_info('\(parts[1])')"
+            return [object] + rows(db, pragma).map { "  " + $0 }
+        }
+    }
+
+    private func rows(_ db: OpaquePointer?, _ sql: String) -> [String] {
         var stmt: OpaquePointer?
-        sqlite3_prepare_v2(db, "SELECT name, type, \"notnull\" FROM pragma_table_info('tracks')", -1, &stmt, nil)
+        sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
         defer { sqlite3_finalize(stmt) }
         var out: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            out.append("\(String(cString: sqlite3_column_text(stmt, 0))) \(String(cString: sqlite3_column_text(stmt, 1))) \(sqlite3_column_int(stmt, 2))")
-        }
+        while sqlite3_step(stmt) == SQLITE_ROW { out.append(String(cString: sqlite3_column_text(stmt, 0))) }
         return out
     }
 }
