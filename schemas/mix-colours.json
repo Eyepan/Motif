@@ -1,0 +1,31 @@
+{
+  "$comment": "Library colours for Camelot keys and BPM, and the rule for which tracks mix well together. Apps copy these values; the Android unit tests check its copy matches. Colours are tuned for the dark UI (all at least 8:1 on #0B0C0F).",
+  "compatibility": {
+    "keys": "Same key, one step either way on the Camelot wheel (same letter, wrapping 12 to 1), or the relative major/minor (same number, other letter).",
+    "maxTempoAdjust": 0.08,
+    "tempo": "Compatible when the incoming BPM, or its half or double, is within maxTempoAdjust of the outgoing BPM."
+  },
+  "keyColours": {
+    "1A": "#EF958E", "1B": "#FDB5AF",
+    "2A": "#E79E6B", "2B": "#FEB98B",
+    "3A": "#D1AC5A", "3B": "#F1C45E",
+    "4A": "#AFB965", "4B": "#C8D56C",
+    "5A": "#84C485", "5B": "#93E195",
+    "6A": "#58C8AD", "6B": "#5AE6C6",
+    "7A": "#47C5D2", "7B": "#40E2F3",
+    "8A": "#64BCED", "8B": "#8FD5FD",
+    "9A": "#8FB0F8", "9B": "#B3CAFC",
+    "10A": "#B6A3F0", "10B": "#CEC0FD",
+    "11A": "#D599D8", "11B": "#F5ADF9",
+    "12A": "#E893B5", "12B": "#FDB1CE"
+  },
+  "bpmColours": {
+    "rule": "bin = round(24 * log2(bpm / 120)) mod 24. Tempos an octave apart share a colour, matching half/double-time mixing; neighbouring bins are neighbouring hues.",
+    "bins": [
+      "#F8A49D", "#F6A88D", "#F0AD7F", "#E7B375", "#DBB970", "#CDC072",
+      "#BBC679", "#A8CB86", "#95CF96", "#82D2A8", "#71D3BA", "#67D2CC",
+      "#65D0DC", "#6CCDEA", "#7AC8F5", "#8CC3FC", "#9EBDFF", "#B1B7FD",
+      "#C2B1F8", "#D2ACEE", "#DFA8E1", "#EAA4D2", "#F2A3C1", "#F6A3AF"
+    ]
+  }
+}

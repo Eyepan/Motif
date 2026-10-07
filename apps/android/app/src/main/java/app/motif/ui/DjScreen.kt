@@ -54,6 +54,7 @@ import app.motif.data.formatTime
 import app.motif.playback.DeckId
 import app.motif.playback.DeckState
 import app.motif.playback.DjEngine
+import app.motif.playback.MixMatch
 import app.motif.ui.theme.Motif
 import kotlinx.coroutines.delay
 import java.util.Locale
@@ -141,19 +142,23 @@ fun DjScreen(dj: DjEngine, tracks: List<Track>, modifier: Modifier = Modifier) {
         }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
             items(shown, key = { it.id }) { track ->
-                BrowserRow(track, loadedOn = DeckId.entries.filter { state[it].track?.id == track.id }, onLoad = { dj.load(it, track) })
+                BrowserRow(
+                    track,
+                    mixWith = ref?.track?.takeIf { it.id != track.id },
+                    loadedOn = DeckId.entries.filter { state[it].track?.id == track.id },
+                    onLoad = { dj.load(it, track) },
+                )
             }
         }
     }
 }
 
-/** Compatible Camelot key and within 4 BPM of the deck as it plays now. */
+/** Mixes with the deck's track: compatible key and a tempo SYNC can match (the shared MixMatch rule). */
 private fun harmonicMatch(deck: DeckState, track: Track): Boolean {
     val ref = deck.track ?: return false
     if (track.id == ref.id) return false
-    val keyOk = ref.musicalKey == null || track.musicalKey?.let { it in ref.compatibleKeys } == true
-    val bpm = deck.bpm
-    val bpmOk = bpm == null || track.bpm?.let { abs(it - bpm) <= 4 } == true
+    val keyOk = ref.musicalKey == null || MixMatch.keys(ref, track)
+    val bpmOk = ref.bpm == null || MixMatch.tempos(ref, track)
     return keyOk && bpmOk
 }
 
@@ -282,7 +287,7 @@ private fun DeckButton(label: String, selected: Boolean, color: Color, enabled: 
 }
 
 @Composable
-private fun BrowserRow(track: Track, loadedOn: List<DeckId>, onLoad: (DeckId) -> Unit) {
+private fun BrowserRow(track: Track, mixWith: Track?, loadedOn: List<DeckId>, onLoad: (DeckId) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -294,8 +299,8 @@ private fun BrowserRow(track: Track, loadedOn: List<DeckId>, onLoad: (DeckId) ->
             Text(track.artist ?: "Unknown artist", fontSize = 12.sp, color = Motif.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text(track.bpm?.let { "${Math.round(it)}" } ?: "—", style = Motif.mono(12.sp), color = Motif.secondary)
-            Text(track.musicalKey ?: "—", style = Motif.mono(12.sp), color = Motif.keyColor(track.musicalKey))
+            MixValue(track.bpm?.let { "${Math.round(it)}" } ?: "—", Motif.bpmColor(track.bpm), mixWith != null && MixMatch.tempos(mixWith, track))
+            MixValue(track.musicalKey ?: "—", Motif.keyColor(track.musicalKey), mixWith != null && MixMatch.keys(mixWith, track))
         }
         DeckId.entries.forEach { id ->
             val loaded = id in loadedOn

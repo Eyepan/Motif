@@ -75,7 +75,7 @@ fun MotifRoot(app: MotifApp) {
         when (tab) {
             Tab.Library -> LibraryScreen(
                 tracks = tracks,
-                currentId = player.current?.id,
+                current = player.current,
                 onPlay = app::play,
                 onDelete = app::delete,
                 onImport = { showImport = true },
@@ -86,7 +86,7 @@ fun MotifRoot(app: MotifApp) {
             Tab.Mix -> DjScreen(app.dj, tracks, modifier)
             Tab.Search -> SearchScreen(
                 tracks = tracks,
-                currentId = player.current?.id,
+                current = player.current,
                 onPlay = app::play,
                 modifier = modifier,
             )

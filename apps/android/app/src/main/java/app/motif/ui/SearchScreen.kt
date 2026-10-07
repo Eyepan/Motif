@@ -31,7 +31,7 @@ import app.motif.ui.theme.Motif
 
 /** Search with DJ filters: `bpm:124`, `bpm:120-126`, `key:8A`. */
 @Composable
-fun SearchScreen(tracks: List<Track>, currentId: String?, onPlay: (List<Track>, Int) -> Unit, modifier: Modifier = Modifier) {
+fun SearchScreen(tracks: List<Track>, current: Track?, onPlay: (List<Track>, Int) -> Unit, modifier: Modifier = Modifier) {
     var query by rememberSaveable { mutableStateOf("") }
     val filter = remember(query) { LibraryFilter(query) }
     val results = remember(tracks, filter) { if (filter.isEmpty) emptyList() else tracks.filter(filter::matches) }
@@ -61,7 +61,7 @@ fun SearchScreen(tracks: List<Track>, currentId: String?, onPlay: (List<Track>, 
         } else {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
                 itemsIndexed(results, key = { _, t -> t.id }) { index, track ->
-                    TrackRow(track, track.id == currentId, onClick = { onPlay(results, index) })
+                    TrackRow(track, track.id == current?.id, onClick = { onPlay(results, index) }, mixWith = current)
                 }
             }
         }

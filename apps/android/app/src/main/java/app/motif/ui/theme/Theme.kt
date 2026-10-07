@@ -9,6 +9,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import kotlin.math.ln
+import kotlin.math.roundToInt
 
 /** Colours from the approved design (/mnt/project-files/design/apple-ui-decisions.md), same values as the Apple Theme. */
 object Motif {
@@ -34,12 +36,40 @@ object Motif {
     fun mono(size: TextUnit, weight: FontWeight = FontWeight.Normal) =
         TextStyle(fontFamily = FontFamily.Monospace, fontSize = size, fontWeight = weight)
 
-    /** Camelot keys get a colour per wheel position; minor keys are a touch softer. */
-    fun keyColor(camelot: String?): Color {
-        val n = camelot?.dropLast(1)?.toIntOrNull()?.takeIf { it in 1..12 } ?: return secondary
-        val minor = camelot.endsWith("A")
-        return Color.hsv((n - 1) * 30f, if (minor) 0.35f else 0.45f, 0.92f)
-    }
+    /**
+     * Camelot key colours from `schemas/mix-colours.json`. Each wheel number
+     * has its own hue and neighbours have neighbouring hues, so keys that mix
+     * look alike; majors (B) are lighter than their relative minors (A).
+     */
+    val keyColors: Map<String, Color> = mapOf(
+        "1A" to Color(0xFFEF958E), "1B" to Color(0xFFFDB5AF),
+        "2A" to Color(0xFFE79E6B), "2B" to Color(0xFFFEB98B),
+        "3A" to Color(0xFFD1AC5A), "3B" to Color(0xFFF1C45E),
+        "4A" to Color(0xFFAFB965), "4B" to Color(0xFFC8D56C),
+        "5A" to Color(0xFF84C485), "5B" to Color(0xFF93E195),
+        "6A" to Color(0xFF58C8AD), "6B" to Color(0xFF5AE6C6),
+        "7A" to Color(0xFF47C5D2), "7B" to Color(0xFF40E2F3),
+        "8A" to Color(0xFF64BCED), "8B" to Color(0xFF8FD5FD),
+        "9A" to Color(0xFF8FB0F8), "9B" to Color(0xFFB3CAFC),
+        "10A" to Color(0xFFB6A3F0), "10B" to Color(0xFFCEC0FD),
+        "11A" to Color(0xFFD599D8), "11B" to Color(0xFFF5ADF9),
+        "12A" to Color(0xFFE893B5), "12B" to Color(0xFFFDB1CE),
+    )
+
+    /** BPM colours from `schemas/mix-colours.json`, one per 1/24 octave from 120 BPM. */
+    val bpmColors: List<Color> = listOf(
+        Color(0xFFF8A49D), Color(0xFFF6A88D), Color(0xFFF0AD7F), Color(0xFFE7B375), Color(0xFFDBB970), Color(0xFFCDC072),
+        Color(0xFFBBC679), Color(0xFFA8CB86), Color(0xFF95CF96), Color(0xFF82D2A8), Color(0xFF71D3BA), Color(0xFF67D2CC),
+        Color(0xFF65D0DC), Color(0xFF6CCDEA), Color(0xFF7AC8F5), Color(0xFF8CC3FC), Color(0xFF9EBDFF), Color(0xFFB1B7FD),
+        Color(0xFFC2B1F8), Color(0xFFD2ACEE), Color(0xFFDFA8E1), Color(0xFFEAA4D2), Color(0xFFF2A3C1), Color(0xFFF6A3AF),
+    )
+
+    fun keyColor(camelot: String?): Color = camelot?.let(keyColors::get) ?: secondary
+
+    /** Tempos a few BPM apart get neighbouring hues; half and double time share a colour. */
+    fun bpmColor(bpm: Double?): Color = bpm?.takeIf { it > 0 }?.let { bpmColors[bpmBin(it)] } ?: secondary
+
+    fun bpmBin(bpm: Double): Int = Math.floorMod((24 * ln(bpm / 120) / ln(2.0)).roundToInt(), 24)
 
     private val artPairs = listOf(
         0xFF2D4B73 to 0xFFBFD6F5, 0xFF6B3A2E to 0xFFF3C9B8, 0xFF3E5A3A to 0xFFCFE3C4,
