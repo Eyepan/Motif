@@ -9,6 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -151,14 +153,18 @@ class LibraryStore(private val context: Context) {
         refresh()
     }
 
-    // Synchronized so a refresh that read the table earlier can't publish after a later one.
-    @Synchronized
-    private fun refresh() {
-        helper.readableDatabase.rawQuery("SELECT * FROM tracks ORDER BY added_at DESC, title", null).use { c ->
-            val list = ArrayList<Track>(c.count)
-            while (c.moveToNext()) list += c.toTrack()
-            _tracks.value = list
+    private val refreshLock = Mutex()
+
+    /**
+     * Re-reads the table and publishes it on the main thread, where the UI
+     * collects it. One refresh at a time, so an older read can't publish after
+     * a newer one.
+     */
+    private suspend fun refresh() = refreshLock.withLock {
+        val list = helper.readableDatabase.rawQuery("SELECT * FROM tracks ORDER BY added_at DESC, title", null).use { c ->
+            ArrayList<Track>(c.count).also { list -> while (c.moveToNext()) list += c.toTrack() }
         }
+        withContext(Dispatchers.Main.immediate) { _tracks.value = list }
     }
 
     /** Statements from a schemas/ asset; the PRAGMA is handled by SQLiteOpenHelper's version. */
