@@ -10,16 +10,17 @@ apps/
   android/    Kotlin / Jetpack Compose app (not started)
 core/
   dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo estimation, crossfade curves
-schemas/      Shared library schema (SQLite) and its migrations, the track JSON schema, the genre list
+server/       Sync service in Rust (axum + Postgres) for accounts and listening history; deploys to Vercel
+schemas/      Shared library schema (SQLite) and its migrations, the track JSON schema, the genre list, the sync API contract
 tools/        Schema checks and the MusicBrainz genre sync
-docs/         Design notes: music sources, metadata, listening history
+docs/         Design notes: music sources, metadata, listening history, server and sync
 ```
 
 ## Principles
 
 - Instant interaction and low memory: no web views, no cross-platform UI layer.
 - Lossless first: FLAC and WAV play bit-for-bit through AVAudioEngine on Apple platforms.
-- Offline-first: the library is a local SQLite database; audio files live in the app container.
+- Offline-first: the library is a local SQLite database; audio files live in the app container. The server only adds accounts and sync; nothing needs it to work.
 - Native media integration: background audio, lock screen / Control Center, remote commands.
 - Share `core/` and `schemas/`, never UI.
 
@@ -43,6 +44,8 @@ swift test                        # MotifKit unit tests
 ```
 
 Rerun the script after changing anything in `core/dsp`.
+
+Server (any platform with Rust and Postgres): see [server/README.md](server/README.md).
 
 ## Music sources
 

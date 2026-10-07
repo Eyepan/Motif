@@ -157,7 +157,7 @@ Because the engine only reads raw events, we can also offer "your recap so far" 
 
 History is collected to the user's Motif account, not only kept on the device. The device log stays the source of truth while offline; the server holds the merged log across all of a user's devices.
 
-- **Service**: a small Motif-run service (Go + Postgres) with two endpoints. `POST /v1/events` takes a batch of events and is idempotent on `id`, so retries never duplicate. `GET /v1/events?after=<cursor>` returns events from the user's other devices. The server stores the same envelope and payload, append-only.
+- **Service**: a small Motif-run service (Rust + Postgres, in `server/`, design in docs/server.md) with two endpoints. `POST /v1/events` takes a batch of events and is idempotent on `id`, so retries never duplicate. `GET /v1/events?after=<cursor>` returns events in server arrival order, so late uploads from a device that was offline are not skipped. The server stores the same envelope and payload, append-only.
 - **Client**: a background uploader sends unsynced rows in batches (on launch, on network change, every few minutes while playing, and via `BGAppRefreshTask` on iOS / WorkManager on Android). Pulled events are inserted locally, so each device ends up with the full log and recaps work offline.
 - **Accounts**: Sign in with Apple and Google. Without an account, everything still works locally; signing in later uploads the whole backlog.
 - **Merging** is a set union: UUIDv7 ids are unique across devices and no event is ever edited, so there are no conflicts.
@@ -188,7 +188,7 @@ History is collected to the user's Motif account, not only kept on the device. T
 
 1. `schemas/history.sql` and `schemas/events/*.v1.schema.json` for `play`, `track_added`, `track_analyzed`, `track_updated`, `track_removed`, `app_session`.
 2. `HistoryStore` in MotifKit (batched writer, `open_play` recovery, export, delete) and hooks in `PlaybackEngine`, `ImportService` and `LibraryStore`.
-3. Sync service (`services/sync`, Go) with accounts, the two event endpoints and delete-range, plus the client uploader and puller.
+3. Sync service (`server/`, Rust) with accounts, the two event endpoints and delete-range, plus the client uploader and puller.
 4. Backfill: on first launch with history, write a `track_added` for every existing track, dated by its `added_at`.
 5. Transition and DJ events when the mixing engine lands.
 6. `core/recap` and the first edition, in time for December.

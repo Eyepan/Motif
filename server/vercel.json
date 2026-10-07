@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/motif" }],
+  "functions": {
+    "api/motif.rs": { "maxDuration": 30 }
+  }
+}
