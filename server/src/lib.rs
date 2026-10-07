@@ -60,6 +60,18 @@ pub fn router(state: AppState) -> Router {
     routes::router().with_state(state)
 }
 
+/// Answers every request with 503 and the configuration problem, so a
+/// deployment missing an environment variable says which one.
+pub fn unconfigured_router(problem: String) -> Router {
+    Router::new().fallback(move || {
+        let body = serde_json::json!({
+            "status": "unconfigured",
+            "error": { "code": "unavailable", "message": format!("server is not configured: {problem}") },
+        });
+        async move { (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(body)) }
+    })
+}
+
 /// Returns a request mapper that removes `prefix` from the path, so the same
 /// router serves `/v1/...` whether or not a platform rewrite left its
 /// destination in the URL.

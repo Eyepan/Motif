@@ -12,11 +12,18 @@ const FUNCTION_PATH: &str = "/api/motif";
 #[tokio::main]
 async fn main() -> Result<(), vercel_runtime::Error> {
     telemetry::init();
-    let config = Config::from_env()?;
-    let state = AppState::new(&config)?;
+    // A missing setting answers every request with a 503 that names it,
+    // instead of crashing into an opaque FUNCTION_INVOCATION_FAILED.
+    let app = match Config::from_env().and_then(|config| AppState::new(&config)) {
+        Ok(state) => router(state),
+        Err(problem) => {
+            tracing::error!(%problem, "server is not configured");
+            motif_server::unconfigured_router(problem)
+        }
+    };
     let app = ServiceBuilder::new()
         .layer(VercelLayer::new())
         .map_request(motif_server::strip_path_prefix(FUNCTION_PATH))
-        .service(router(state));
+        .service(app);
     vercel_runtime::run(app).await
 }

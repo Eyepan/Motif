@@ -360,3 +360,16 @@ async fn repeated_wrong_passwords_lock_the_username() {
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
 }
+
+#[tokio::test]
+async fn unconfigured_server_names_the_problem() {
+    let app = motif_server::unconfigured_router("DATABASE_URL is not set".into());
+    let (status, body) = call(&app, "GET", "/health", None, None).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("DATABASE_URL")
+    );
+}
