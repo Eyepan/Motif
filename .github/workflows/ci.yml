@@ -52,8 +52,10 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
-      - name: Release build of the Vercel function
-        run: cargo build --release --locked --bin motif
+      - name: Release build of the Vercel function on Vercel's Rust version
+        run: |
+          rustup toolchain install 1.92 --profile minimal
+          cargo +1.92 build --release --locked --bin motif
 
   apple:
     runs-on: macos-15

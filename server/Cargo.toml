@@ -3,6 +3,8 @@ name = "motif-server"
 version = "0.1.0"
 edition = "2024"
 publish = false
+# Vercel builds with this toolchain; CI checks the server builds on it too.
+rust-version = "1.92"
 description = "Motif sync service: accounts, listening history and library sync"
 
 [lib]
@@ -21,6 +23,7 @@ name = "motif-server"
 path = "src/bin/motif-server.rs"
 
 [dependencies]
+argon2 = "0.6"
 axum = "0.8"
 base64 = "0.22"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs", "use_pem"] }
@@ -29,7 +32,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "j
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
-sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "json", "migrate", "derive", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls-aws-lc-rs", "uuid", "json", "migrate", "derive", "macros"] }
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tower = "0.5"

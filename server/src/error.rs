@@ -12,6 +12,10 @@ pub enum ApiError {
     Unauthorized(&'static str),
     #[error("not found")]
     NotFound,
+    #[error("{0}")]
+    Conflict(&'static str),
+    #[error("{0}")]
+    TooManyRequests(&'static str),
     #[error("service unavailable")]
     Unavailable,
     #[error("internal error")]
@@ -24,6 +28,8 @@ impl ApiError {
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            ApiError::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),
             ApiError::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }

@@ -159,7 +159,7 @@ History is collected to the user's Motif account, not only kept on the device. T
 
 - **Service**: a small Motif-run service (Rust + Postgres, in `server/`, design in docs/server.md) with two endpoints. `POST /v1/events` takes a batch of events and is idempotent on `id`, so retries never duplicate. `GET /v1/events?after=<cursor>` returns events in server arrival order, so late uploads from a device that was offline are not skipped. The server stores the same envelope and payload, append-only.
 - **Client**: a background uploader sends unsynced rows in batches (on launch, on network change, every few minutes while playing, and via `BGAppRefreshTask` on iOS / WorkManager on Android). Pulled events are inserted locally, so each device ends up with the full log and recaps work offline.
-- **Accounts**: Sign in with Apple and Google. Without an account, everything still works locally; signing in later uploads the whole backlog.
+- **Accounts**: a username and password (docs/server.md). Without an account, everything still works locally; signing in later uploads the whole backlog.
 - **Merging** is a set union: UUIDv7 ids are unique across devices and no event is ever edited, so there are no conflicts.
 - **Track identity across devices**: `track_id` is per install, so the same song on Mac and iPhone has two ids. Each track gets a `track_key` at import: a SHA-256 of the audio file's contents, which matches whenever the same file is imported on two devices. Recaps group plays by `track_key`, with a fallback match on normalized artist, title and duration for re-encoded copies. This needs a `content_hash` column added to the library schema.
 - **Transport**: TLS only, and the server encrypts at rest. Events carry no file paths or search text.

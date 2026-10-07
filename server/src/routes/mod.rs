@@ -1,6 +1,7 @@
 mod auth;
 mod events;
 mod health;
+mod password;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
@@ -17,6 +18,9 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(health::index))
         .route("/health", get(health::health))
+        .route("/v1/auth/register", post(password::register))
+        .route("/v1/auth/login", post(password::login))
+        .route("/v1/auth/password", post(password::change))
         .route("/v1/auth/token", post(auth::token))
         .route("/v1/auth/refresh", post(auth::refresh))
         .route("/v1/auth/logout", post(auth::logout))
