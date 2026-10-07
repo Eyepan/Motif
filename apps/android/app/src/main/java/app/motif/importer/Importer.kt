@@ -34,8 +34,9 @@ class ImportJob(val id: String, val fileName: String, val stage: Stage) {
 }
 
 /**
- * Add Music: copies picked files into the library untouched (no transcoding,
- * bit-perfect), reads their tags and format, then analyses them on device.
+ * Add Music: copies picked files (or files Motif downloaded) into the library
+ * untouched (no transcoding, bit-perfect), reads their tags and format, then
+ * analyses them on device.
  * Runs in the app scope so it carries on when the sheet is closed.
  */
 class Importer(
@@ -75,15 +76,53 @@ class Importer(
     }
 
     private suspend fun run(job: ImportJob, uri: Uri) {
+        runCatching {
+            add(job, null, null) { dest ->
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { input.copyTo(it, 256 * 1024) }
+                } ?: error("Couldn't open the file")
+            }
+        }
+    }
+
+    /**
+     * Adds a file Motif downloaded from a catalog. [info] fills in whatever the
+     * file's own tags leave out, and [cover] is the catalog's art. Returns once
+     * the track is in the library (and analysed, when that's on).
+     */
+    suspend fun importDownloaded(file: File, fileName: String, info: SourceInfo, cover: ByteArray?): Track {
+        val job = ImportJob(UUID.randomUUID().toString(), fileName, ImportJob.Stage.Copying)
+        _jobs.update { it + job }
+        return queue.withLock {
+            add(job, info, cover) { dest ->
+                if (!file.renameTo(dest)) {
+                    file.copyTo(dest, overwrite = true)
+                    file.delete()
+                }
+            }
+        }
+    }
+
+    /** Where a downloaded file came from, and the catalog's tags for it. */
+    class SourceInfo(
+        val source: String,
+        val sourceRef: String,
+        val licenseUrl: String?,
+        val title: String?,
+        val artist: String?,
+        val album: String?,
+    )
+
+    /** Puts the file in the media folder via [fill], reads it, saves it and analyses it. */
+    private suspend fun add(job: ImportJob, info: SourceInfo?, cover: ByteArray?, fill: (File) -> Unit): Track {
         val ext = job.fileName.substringAfterLast('.', "").lowercase()
         val id = UUID.randomUUID().toString()
         val dest = File(store.mediaDir, if (ext.isEmpty()) id else "$id.$ext")
         try {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                dest.outputStream().use { input.copyTo(it, 256 * 1024) }
-            } ?: error("Couldn't open the file")
-            val (read, raw) = readTrack(id, dest, job.fileName)
+            fill(dest)
+            val (read, raw) = readTrack(id, dest, job.fileName, info)
             var track = read
+            if (cover != null) runCatching { CatalogArt.save(cover, CatalogArt.fileFor(context.filesDir, id)) }
             store.insert(track, raw)
 
             if (analyzeOnImport()) {
@@ -95,14 +134,17 @@ class Importer(
                 }
             }
             setStage(job.id, ImportJob.Stage.Done(track))
+            return track
         } catch (e: Exception) {
             dest.delete()
+            CatalogArt.fileFor(context.filesDir, id).delete()
             setStage(job.id, ImportJob.Stage.Failed(e.message ?: "Import failed"))
+            throw e
         }
     }
 
-    /** The track with cleaned tags, and the tags as read. */
-    private fun readTrack(id: String, file: File, fileName: String): Pair<Track, RawTags> {
+    /** The track with cleaned tags (the catalog's where the file has none), and the tags as read. */
+    private fun readTrack(id: String, file: File, fileName: String, info: SourceInfo?): Pair<Track, RawTags> {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
@@ -145,9 +187,9 @@ class Importer(
             val albumArtist = TagCleaner.clean(raw.albumArtist, suffixes)
             return Track(
                 id = id,
-                title = TagCleaner.clean(raw.title, suffixes) ?: fileName.substringBeforeLast('.'),
-                artist = TagCleaner.clean(raw.artist, suffixes) ?: albumArtist,
-                album = TagCleaner.clean(raw.album, suffixes),
+                title = TagCleaner.clean(raw.title, suffixes) ?: info?.title ?: fileName.substringBeforeLast('.'),
+                artist = TagCleaner.clean(raw.artist, suffixes) ?: albumArtist ?: info?.artist,
+                album = TagCleaner.clean(raw.album, suffixes) ?: info?.album,
                 albumArtist = albumArtist,
                 durationMs = durationMs,
                 filePath = file.name,
@@ -155,6 +197,9 @@ class Importer(
                 sampleRate = sampleRate,
                 bitDepth = bitDepth,
                 channels = channels,
+                source = info?.source ?: "local",
+                sourceRef = info?.sourceRef,
+                licenseUrl = info?.licenseUrl,
                 addedAt = System.currentTimeMillis() / 1000,
             ) to raw
         } finally {

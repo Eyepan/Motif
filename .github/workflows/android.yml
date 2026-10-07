@@ -31,6 +31,9 @@ jobs:
         if: github.event_name != 'push'
         run: ./gradlew --no-daemon testDebugUnitTest
       - name: Build release APK
+        env:
+          # Optional: without it, Discover asks for a Jamendo client id the first time.
+          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
         run: ./gradlew --no-daemon assembleRelease
       - name: Check the DSP core is packaged
         run: |
