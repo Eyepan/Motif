@@ -19,17 +19,59 @@ public actor LibraryStore {
         id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT, album TEXT,
         duration_ms INTEGER NOT NULL DEFAULT 0, file_path TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
         sample_rate INTEGER, bit_depth INTEGER, channels INTEGER, source TEXT NOT NULL, source_ref TEXT,
-        license_url TEXT, bpm REAL, loudness_db REAL, musical_key TEXT, waveform BLOB, first_downbeat REAL,
-    added_at INTEGER NOT NULL
+        license_url TEXT, bpm REAL, loudness_db REAL, musical_key TEXT, waveform BLOB, added_at INTEGER NOT NULL,
+        album_artist TEXT, track_no INTEGER, disc_no INTEGER, release_date TEXT, isrc TEXT,
+        mb_recording_id TEXT, mb_release_id TEXT, energy REAL, beat_offset_ms INTEGER, analyzer_version INTEGER,
+        content_hash TEXT, artwork_hash TEXT
     );
     CREATE INDEX IF NOT EXISTS tracks_artist_album ON tracks(artist, album);
     CREATE INDEX IF NOT EXISTS tracks_added_at ON tracks(added_at DESC);
+    \(metadataTables)
+    """
+
+    /// Indexes and tables added in v3, shared by `schema` and the v3 migration.
+    private static let metadataTables = """
+    CREATE INDEX IF NOT EXISTS tracks_album_artist ON tracks(album_artist, album, disc_no, track_no);
+    CREATE INDEX IF NOT EXISTS tracks_mb_recording ON tracks(mb_recording_id);
+    CREATE INDEX IF NOT EXISTS tracks_content_hash ON tracks(content_hash);
+    CREATE TABLE IF NOT EXISTS track_tags (
+        track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        key TEXT NOT NULL, value TEXT NOT NULL, origin TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS track_tags_track ON track_tags(track_id, key);
+    CREATE TABLE IF NOT EXISTS track_overrides (
+        track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        field TEXT NOT NULL, value TEXT, PRIMARY KEY (track_id, field)
+    );
+    CREATE TABLE IF NOT EXISTS artists (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_name TEXT, norm_name TEXT NOT NULL UNIQUE, mbid TEXT UNIQUE
+    );
+    CREATE TABLE IF NOT EXISTS track_artists (
+        track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        artist_id TEXT NOT NULL REFERENCES artists(id),
+        role TEXT NOT NULL, position INTEGER NOT NULL, PRIMARY KEY (track_id, artist_id, role)
+    );
+    CREATE INDEX IF NOT EXISTS track_artists_artist ON track_artists(artist_id, role);
+    CREATE TABLE IF NOT EXISTS track_genres (
+        track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        genre_id TEXT NOT NULL, provenance TEXT NOT NULL, PRIMARY KEY (track_id, genre_id)
+    );
+    CREATE INDEX IF NOT EXISTS track_genres_genre ON track_genres(genre_id);
     """
 
     /// Steps from version N-1 to N, applied to databases created before N.
     private static let migrations: [Int32: String] = [
         2: "ALTER TABLE tracks ADD COLUMN musical_key TEXT; ALTER TABLE tracks ADD COLUMN waveform BLOB;",
-        3: "ALTER TABLE tracks ADD COLUMN first_downbeat REAL;",
+        // schemas/migrations/3.sql
+        3: """
+        ALTER TABLE tracks ADD COLUMN album_artist TEXT; ALTER TABLE tracks ADD COLUMN track_no INTEGER;
+        ALTER TABLE tracks ADD COLUMN disc_no INTEGER; ALTER TABLE tracks ADD COLUMN release_date TEXT;
+        ALTER TABLE tracks ADD COLUMN isrc TEXT; ALTER TABLE tracks ADD COLUMN mb_recording_id TEXT;
+        ALTER TABLE tracks ADD COLUMN mb_release_id TEXT; ALTER TABLE tracks ADD COLUMN energy REAL;
+        ALTER TABLE tracks ADD COLUMN beat_offset_ms INTEGER; ALTER TABLE tracks ADD COLUMN analyzer_version INTEGER;
+        ALTER TABLE tracks ADD COLUMN content_hash TEXT; ALTER TABLE tracks ADD COLUMN artwork_hash TEXT;
+        \(metadataTables)
+        """,
     ]
 
     /// Bytes in `Track.waveform`.
@@ -112,10 +154,14 @@ public actor LibraryStore {
         )
     }
 
+    /// Inserts or updates in place. Not INSERT OR REPLACE: that deletes the old
+    /// row, which would cascade to its tags, credits and genres and null every
+    /// column `Track` doesn't carry.
     public func upsert(_ t: Track) throws {
         let placeholders = (1...18).map { "?\($0)" }.joined(separator: ", ")
+        let updates = Self.columns.split(separator: ", ").dropFirst().map { "\($0) = excluded.\($0)" }.joined(separator: ", ")
         try run(
-            "INSERT OR REPLACE INTO tracks (\(Self.columns)) VALUES (\(placeholders))",
+            "INSERT INTO tracks (\(Self.columns)) VALUES (\(placeholders)) ON CONFLICT(id) DO UPDATE SET \(updates)",
             bind: [
                 t.id.uuidString, t.title, t.artist, t.album, t.durationMs, t.filePath, t.format,
                 t.sampleRate, t.bitDepth, t.channels, t.source.rawValue, t.sourceRef,

@@ -16,6 +16,11 @@ android {
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "0.1.$versionCode"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // Free key from developer.jamendo.com, from the environment (a CI secret) or
+        // `jamendo.clientId` in ~/.gradle/gradle.properties. Empty means Discover asks for one.
+        val jamendo = System.getenv("JAMENDO_CLIENT_ID") ?: providers.gradleProperty("jamendo.clientId").orNull ?: ""
+        buildConfigField("String", "JAMENDO_CLIENT_ID", "\"${jamendo.trim()}\"")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -51,7 +56,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     packaging {
         jniLibs { useLegacyPackaging = false }
@@ -76,4 +84,13 @@ dependencies {
     implementation(libs.media3.session)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)
+    // The real org.json, since android.jar's copy only has stubs in unit tests.
+    testImplementation(libs.json)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.espresso.intents)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

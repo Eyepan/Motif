@@ -1,0 +1,196 @@
+# Motif sync API. Source of truth for the Apple and Android clients; the server
+# in server/ implements it and its tests in server/tests/api.rs exercise it.
+# Bump info.version on any change; breaking changes go under a new /v2 prefix.
+openapi: 3.1.0
+info:
+  title: Motif sync API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+    description: motif-server on a developer machine
+security:
+  - bearer: []
+paths:
+  /health:
+    get:
+      summary: Liveness and database check
+      security: []
+      responses:
+        "200": { description: Healthy, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+        "503": { description: Database unreachable, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+  /v1/auth/token:
+    post:
+      summary: Exchange a provider ID token for a Motif session
+      description: Creates the account on first sign-in. The ID token comes from Sign in with Apple or Google Sign-In on the device.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, id_token]
+              properties:
+                provider: { type: string, enum: [apple, google, dev], description: "dev is accepted only when the server runs with MOTIF_DEV_AUTH" }
+                id_token: { type: string }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/auth/refresh:
+    post:
+      summary: Rotate a refresh token
+      description: Each refresh token works once. Store the new pair before using it. Presenting an already-rotated token (outside a 60 s retry window) signs out every device session from that sign-in.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RefreshRequest" } } }
+      responses:
+        "200": { description: New session, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/auth/logout:
+    post:
+      summary: Sign this device out
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RefreshRequest" } } }
+      responses:
+        "204": { description: Signed out (also when the token was unknown) }
+  /v1/me:
+    get:
+      summary: The signed-in account
+      responses:
+        "200":
+          description: Account
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user_id, identities]
+                properties:
+                  user_id: { type: string, format: uuid }
+                  identities:
+                    type: array
+                    items:
+                      type: object
+                      required: [provider]
+                      properties:
+                        provider: { type: string }
+                        email: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/events:
+    post:
+      summary: Upload listening history events
+      description: |
+        Idempotent on event id: retrying a batch is always safe. Events in `inserted`
+        or `duplicates` are acknowledged and the device marks them synced. Rejected
+        events will never be accepted as sent; keep them locally and stop retrying them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events: { type: array, maxItems: 1000, items: { $ref: "#/components/schemas/Event" } }
+      responses:
+        "200":
+          description: Batch processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inserted, duplicates, rejected]
+                properties:
+                  inserted: { type: integer }
+                  duplicates: { type: integer }
+                  rejected:
+                    type: array
+                    items:
+                      type: object
+                      required: [index, reason]
+                      properties:
+                        index: { type: integer, description: Position in the uploaded array }
+                        id: { description: The event's id as sent, if it had one }
+                        reason: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+    get:
+      summary: Pull events in server arrival order
+      description: Start with no cursor, store next_cursor, and call again while has_more is true.
+      parameters:
+        - { name: after, in: query, schema: { type: string }, description: Opaque cursor from a previous pull }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 500 } }
+        - { name: exclude_device, in: query, schema: { type: string }, description: Skip events uploaded by this device_id }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, next_cursor, has_more]
+                properties:
+                  events: { type: array, items: { $ref: "#/components/schemas/Event" } }
+                  next_cursor: { type: string }
+                  has_more: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, description: Access token from /v1/auth/token, valid 15 minutes }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: { type: string, enum: [bad_request, unauthorized, not_found, unavailable, internal] }
+                  message: { type: string }
+  schemas:
+    Health:
+      type: object
+      required: [status, version, database]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        database: { type: string, enum: [ok, unreachable] }
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+    Session:
+      type: object
+      required: [user_id, access_token, token_type, expires_in, refresh_token]
+      properties:
+        user_id: { type: string, format: uuid }
+        access_token: { type: string }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, description: Seconds until the access token expires }
+        refresh_token: { type: string, description: Store in the Keychain / Android Keystore. Valid 90 days. }
+    Event:
+      description: One history event, the same envelope as schemas/history.sql on the device (docs/analytics.md). Unknown fields are ignored.
+      type: object
+      required: [id, type, v, at_ms, tz_min, device_id, payload]
+      properties:
+        id: { type: string, format: uuid, description: UUIDv7 minted on the device }
+        type: { type: string, pattern: "^[a-z][a-z0-9_]{0,63}$", examples: [play, track_added] }
+        v: { type: integer, minimum: 1, description: Payload version for this type }
+        at_ms: { type: integer, format: int64, description: Unix ms, UTC }
+        tz_min: { type: integer, minimum: -1080, maximum: 1080, description: Local UTC offset in minutes }
+        device_id: { type: string, minLength: 1, maxLength: 64 }
+        session_id: { type: string, maxLength: 128 }
+        track_id: { type: string, maxLength: 128 }
+        track_key: { type: string, maxLength: 128, description: SHA-256 of the audio file content }
+        payload: { type: object, description: "Per-type JSON, at most 16 KiB, validated by schemas/events/<type>.v<v>.schema.json" }

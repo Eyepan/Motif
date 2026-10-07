@@ -17,6 +17,16 @@ scripts/build-dsp.sh          # needs rustup + the Android NDK; optional, analys
 ./gradlew assembleRelease     # or installDebug with a device attached
 ```
 
+## Emulator tests
+
+`app/src/androidTest` drives the real app on an emulator: add a folder through Add Music, check the tags and format the importer read, check album grouping, and play a track. The test audio is generated FLAC (`TestAudio.kt`), served as a folder by a debug-only documents provider (`app/src/debug`) so the import runs the same Storage Access Framework code as a picked folder.
+
+CI runs them on every PR in the Android workflow's **Emulator tests** job (API 34). Screenshots of each step, the test report and logcat are in the run's `emulator-tests-<run>` artifact. Locally, with an emulator or phone attached:
+
+```sh
+scripts/emulator-tests.sh     # screenshots land in build/emulator-tests
+```
+
 ## Layout
 
 - `app/src/main/java/app/motif/`
@@ -24,4 +34,5 @@ scripts/build-dsp.sh          # needs rustup + the Android NDK; optional, analys
   - `importer/`: copy files in untouched, read tags, decode with MediaCodec and analyse with the DSP core
   - `playback/`: `PlaybackEngine` (gapless ExoPlayer; "Mix into next" blends on a second player with tempo match and the DSP core's equal-power curve), `PlaybackService` (MediaSession, notification, headset/Bluetooth)
   - `ui/`: Compose screens: Library, Search, Now Playing, Add Music; Crates and DJ Mix are placeholders for now
+- `app/src/androidTest/`: emulator tests; `app/src/debug/`: the test folder provider
 - `dsp-jni/`: JNI entry points over `core/dsp`, built per ABI by `scripts/build-dsp.sh`

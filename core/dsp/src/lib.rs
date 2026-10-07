@@ -6,6 +6,7 @@ pub mod beatgrid;
 pub mod crossfade;
 pub mod key;
 pub mod mix;
+pub mod meta;
 
 use analysis::Analyzer;
 

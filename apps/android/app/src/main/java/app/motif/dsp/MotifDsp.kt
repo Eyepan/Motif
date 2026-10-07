@@ -54,4 +54,11 @@ object MotifDsp {
         masterBpm: Double, masterDownbeat: Double, masterPos: Double, masterSpeed: Double,
         slaveBpm: Double, slaveDownbeat: Double, slavePos: Double, snap: Boolean,
     ): DoubleArray?
+    // Tag cleanup and artist credits (core/dsp/src/meta.rs). Use through data.TagCleaner.
+    @JvmStatic external fun metaCleanerVersion(): Int
+    @JvmStatic external fun metaNorm(text: String): String
+    @JvmStatic external fun metaDetectSiteSuffix(fields: Array<String?>): String?
+    @JvmStatic external fun metaCleanField(text: String, suffixes: Array<String>): String
+    /** [name, role, name, role, ...]; [known] holds names already passed through [metaNorm]. */
+    @JvmStatic external fun metaSplitArtists(credit: String, known: Array<String>): Array<String>?
 }

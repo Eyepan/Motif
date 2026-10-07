@@ -22,16 +22,19 @@ class LibraryStore(private val context: Context) {
 
     private val helper = object : SQLiteOpenHelper(context, "library.sqlite", null, SCHEMA_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
-            schemaStatements().forEach(db::execSQL)
+            statements("library.sql").forEach(db::execSQL)
         }
 
+        /** Android shipped at v2, so every step it needs is in schemas/migrations. Runs in one transaction. */
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Android shipped at v2. Steps mirror schemas/library.sql's history.
-            if (oldVersion < 3) db.execSQL("ALTER TABLE tracks ADD COLUMN first_downbeat REAL")
+            for (version in oldVersion + 1..newVersion) {
+                statements("migrations/$version.sql").forEach(db::execSQL)
+            }
         }
 
         override fun onConfigure(db: SQLiteDatabase) {
             db.enableWriteAheadLogging()
+            db.setForeignKeyConstraintsEnabled(true)
         }
     }
 
@@ -40,11 +43,86 @@ class LibraryStore(private val context: Context) {
 
     fun fileFor(track: Track): File = File(mediaDir, track.filePath)
 
-    suspend fun load() = withContext(Dispatchers.IO) { refresh() }
+    /** Site names appended to tags anywhere in the library (see [TagCleaner]); filled by [load]. */
+    @Volatile var siteSuffixes: Set<String> = emptySet()
+        private set
 
-    suspend fun insert(track: Track) = withContext(Dispatchers.IO) {
-        helper.writableDatabase.insertOrThrow("tracks", null, track.toValues())
+    suspend fun load() = withContext(Dispatchers.IO) {
+        recleanIfNeeded()
         refresh()
+    }
+
+    /** Inserts a track and the raw tags its cleaned values came from. */
+    suspend fun insert(track: Track, raw: RawTags? = null) = withContext(Dispatchers.IO) {
+        val db = helper.writableDatabase
+        db.beginTransaction()
+        try {
+            db.insertOrThrow("tracks", null, track.toValues())
+            raw?.let { insertRawTags(db, track.id, it) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        raw?.let(TagCleaner::siteSuffix)?.let { siteSuffixes = siteSuffixes + it }
+        refresh()
+    }
+
+    private fun insertRawTags(db: SQLiteDatabase, trackId: String, raw: RawTags) {
+        for ((key, value) in raw.entries()) {
+            db.insert("track_tags", null, ContentValues().apply {
+                put("track_id", trackId)
+                put("key", key)
+                put("value", value)
+                put("origin", "tag")
+            })
+        }
+    }
+
+    /**
+     * Collects site suffixes from every track's raw tags and, when the shared
+     * cleanup rules changed since the last run (or never ran), re-cleans
+     * title, artist, album and album artist from those raw tags. Tracks
+     * imported before raw tags were kept use their current values as raw.
+     */
+    private fun recleanIfNeeded() {
+        val version = TagCleaner.version
+        if (version == 0) return
+        val db = helper.writableDatabase
+        val raw = HashMap<String, MutableMap<String, String>>()
+        db.rawQuery("SELECT track_id, key, value FROM track_tags WHERE origin = 'tag'", null).use { c ->
+            while (c.moveToNext()) raw.getOrPut(c.getString(0)) { HashMap() }[c.getString(1)] = c.getString(2)
+        }
+        val prefs = context.getSharedPreferences("library", Context.MODE_PRIVATE)
+        val stale = prefs.getInt(PREF_CLEANER_VERSION, 0) < version
+        val tracks = if (stale) {
+            db.rawQuery("SELECT * FROM tracks", null).use { c -> buildList { while (c.moveToNext()) add(c.toTrack()) } }
+        } else {
+            emptyList()
+        }
+        val tags = tracks.associate { t ->
+            t.id to (raw[t.id]?.let(RawTags::of) ?: RawTags(t.title, t.artist, t.album, t.albumArtist))
+        }
+        siteSuffixes = (raw.values.map(RawTags::of) + tags.values).mapNotNull(TagCleaner::siteSuffix).toSet()
+        if (!stale) return
+
+        db.beginTransaction()
+        try {
+            for (t in tracks) {
+                val r = tags.getValue(t.id)
+                if (t.id !in raw) insertRawTags(db, t.id, r)
+                val values = ContentValues().apply {
+                    put("title", TagCleaner.clean(r.title, siteSuffixes) ?: t.title)
+                    put("artist", TagCleaner.clean(r.artist, siteSuffixes) ?: TagCleaner.clean(r.albumArtist, siteSuffixes))
+                    put("album", TagCleaner.clean(r.album, siteSuffixes))
+                    put("album_artist", TagCleaner.clean(r.albumArtist, siteSuffixes))
+                }
+                db.update("tracks", values, "id = ?", arrayOf(t.id))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        prefs.edit().putInt(PREF_CLEANER_VERSION, version).apply()
     }
 
     suspend fun updateAnalysis(
@@ -61,7 +139,7 @@ class LibraryStore(private val context: Context) {
                 put("loudness_db", loudnessDb)
                 put("musical_key", key)
                 put("waveform", waveform)
-                put("first_downbeat", firstDownbeat)
+                put("beat_offset_ms", firstDownbeat?.let { Math.round(it * 1000) })
             }
             helper.writableDatabase.update("tracks", values, "id = ?", arrayOf(id))
             refresh()
@@ -81,9 +159,9 @@ class LibraryStore(private val context: Context) {
         }
     }
 
-    /** CREATE statements from library.sql; the PRAGMA is handled by SQLiteOpenHelper's version. */
-    private fun schemaStatements(): List<String> {
-        val sql = context.assets.open("library.sql").bufferedReader().use { it.readText() }
+    /** Statements from a schemas/ asset; the PRAGMA is handled by SQLiteOpenHelper's version. */
+    private fun statements(asset: String): List<String> {
+        val sql = context.assets.open(asset).bufferedReader().use { it.readText() }
         return sql.lines()
             .map { it.substringBefore("--").trimEnd() }
             .joinToString("\n")
@@ -96,6 +174,7 @@ class LibraryStore(private val context: Context) {
         /** Matches `PRAGMA user_version` in schemas/library.sql. */
         const val SCHEMA_VERSION = 3
         const val WAVEFORM_LENGTH = 128
+        private const val PREF_CLEANER_VERSION = "tag_cleaner_version"
     }
 }
 
@@ -117,8 +196,9 @@ private fun Track.toValues() = ContentValues().apply {
     put("loudness_db", loudnessDb)
     put("musical_key", musicalKey)
     put("waveform", waveform)
-    put("first_downbeat", firstDownbeat)
+    put("beat_offset_ms", firstDownbeat?.let { Math.round(it * 1000) })
     put("added_at", addedAt)
+    put("album_artist", albumArtist)
 }
 
 private fun Cursor.str(name: String): String? = getColumnIndexOrThrow(name).let { if (isNull(it)) null else getString(it) }
@@ -143,6 +223,7 @@ private fun Cursor.toTrack() = Track(
     loudnessDb = double("loudness_db"),
     musicalKey = str("musical_key"),
     waveform = getColumnIndexOrThrow("waveform").let { if (isNull(it)) null else getBlob(it) },
-    firstDownbeat = double("first_downbeat"),
+    firstDownbeat = double("beat_offset_ms")?.let { it / 1000 },
     addedAt = getLong(getColumnIndexOrThrow("added_at")),
+    albumArtist = str("album_artist"),
 )

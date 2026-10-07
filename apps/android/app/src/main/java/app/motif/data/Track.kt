@@ -28,6 +28,7 @@ data class Track(
     val waveform: ByteArray? = null,
     /** Unix seconds. */
     val addedAt: Long,
+    val albumArtist: String? = null,
 ) {
     val isLossless: Boolean get() = format in setOf("flac", "wav", "alac", "aiff")
 
@@ -81,7 +82,7 @@ data class Track(
     // ByteArray needs content equality for state diffing.
     override fun equals(other: Any?): Boolean =
         other is Track && id == other.id && title == other.title && artist == other.artist &&
-            album == other.album && durationMs == other.durationMs && filePath == other.filePath &&
+            album == other.album && albumArtist == other.albumArtist && durationMs == other.durationMs && filePath == other.filePath &&
             format == other.format && sampleRate == other.sampleRate && bitDepth == other.bitDepth &&
             bpm == other.bpm && musicalKey == other.musicalKey && loudnessDb == other.loudnessDb &&
             firstDownbeat == other.firstDownbeat &&

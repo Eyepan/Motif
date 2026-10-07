@@ -9,16 +9,18 @@ apps/
   apple/      SwiftUI app for iOS + macOS (one multiplatform target) and MotifKit, its Swift package
   android/    Kotlin / Jetpack Compose app (not started)
 core/
-  dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo, key, beat grids, crossfades, beat-aligned blend planning and deck sync
-schemas/      Shared library schema (SQLite) and the track JSON schema used for sync/import
-docs/         Design notes, including where music comes from
+  dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo, key, beat grids, crossfades, beat-aligned blend planning, deck sync, tag cleanup
+server/       Sync service in Rust (axum + Postgres) for accounts and listening history; deploys to Vercel
+schemas/      Shared library schema (SQLite) and its migrations, the track JSON schema, the genre list, the sync API contract
+tools/        Schema checks and the MusicBrainz genre sync
+docs/         Design notes: music sources, metadata, listening history, server and sync
 ```
 
 ## Principles
 
 - Instant interaction and low memory: no web views, no cross-platform UI layer.
 - Lossless first: FLAC and WAV play bit-for-bit through AVAudioEngine on Apple platforms.
-- Offline-first: the library is a local SQLite database; audio files live in the app container.
+- Offline-first: the library is a local SQLite database; audio files live in the app container. The server only adds accounts and sync; nothing needs it to work.
 - Native media integration: background audio, lock screen / Control Center, remote commands.
 - Share `core/` and `schemas/`, never UI.
 
@@ -42,6 +44,8 @@ swift test                        # MotifKit unit tests
 ```
 
 Rerun the script after changing anything in `core/dsp`.
+
+Server (any platform with Rust and Postgres): see [server/README.md](server/README.md).
 
 ## Music sources
 
