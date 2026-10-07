@@ -10,8 +10,8 @@ That leads to one rule: **record what happened, not what we want to show.** We k
 
 ## Principles
 
-- **On-device only.** No telemetry, no analytics SDK, no network. The log lives next to the library and leaves the device only when the user exports or (later) syncs it between their own devices.
-- **Append-only.** Events are inserted, never updated. The single exception is user-requested deletion (see Privacy).
+- **Local first, synced to the user's account.** Events are always written to the device first, so tracking works offline. When online, they upload to Motif's own sync service under the user's account, and every device pulls the others' events. No third-party analytics SDK.
+- **Append-only.** Events are inserted, never edited (only the local `synced` flag flips). The single exception is user-requested deletion (see Privacy controls).
 - **Self-contained.** The log can rebuild the library as it was on any date, so a recap still works for tracks that were since deleted or retagged.
 - **Shared, versioned schema.** The log format lives in `schemas/` like the library schema. Apple and Android write identical events; recap code reads either.
 - **Never on the audio path.** Events are buffered in memory and written in batches off the main actor. A failed write drops an event, never a buffer.
@@ -33,12 +33,15 @@ CREATE TABLE IF NOT EXISTS events (
     device_id   TEXT NOT NULL,          -- random per install, never a hardware id
     session_id  TEXT,                   -- app foreground session
     track_id    TEXT,                   -- denormalized from payload for indexing
+    track_key   TEXT,                   -- cross-device track identity (see Sync)
+    synced      INTEGER NOT NULL DEFAULT 0, -- 1 once the server acknowledged it; the only column ever updated
     payload     TEXT NOT NULL           -- JSON, validated by schemas/events/<type>.v<v>.schema.json
 );
 
 CREATE INDEX IF NOT EXISTS events_at ON events(at_ms);
 CREATE INDEX IF NOT EXISTS events_type_at ON events(type, at_ms);
-CREATE INDEX IF NOT EXISTS events_track ON events(track_id, at_ms);
+CREATE INDEX IF NOT EXISTS events_track ON events(track_key, at_ms);
+CREATE INDEX IF NOT EXISTS events_unsynced ON events(synced) WHERE synced = 0;
 
 -- The play in progress, checkpointed every ~15 s. Not part of the log:
 -- on launch, a leftover row becomes a 'play' event with end_reason 'interrupted'
@@ -113,7 +116,7 @@ These make the log self-contained, so a recap can describe a track even after it
 
 | Event | Payload | Source |
 | --- | --- | --- |
-| `track_added` | full track snapshot as in `schemas/track.schema.json` (title, artist, album, format, rate, bit depth, source, license) | `ImportService.ingest` |
+| `track_added` | full track snapshot as in `schemas/track.schema.json` (title, artist, album, format, rate, bit depth, source, license) plus `track_key` | `ImportService.ingest` |
 | `track_analyzed` | `bpm`, `key`, `loudness_db`, `analyzer_version` | `LibraryStore.updateAnalysis` |
 | `track_updated` | changed fields only | `LibraryStore.upsert` on an existing id (tag edits) |
 | `track_removed` | `track_id` | `LibraryStore.delete` |
@@ -139,7 +142,7 @@ None of these need new tracking. They are here to check the log is rich enough, 
 - **Discovery**: first-ever play date per track and artist; new artists this year; rediscoveries (a track back after six or more months away); what you imported vs what you actually played.
 - **Sound**: your average BPM by month (the year as a tempo curve); Camelot key wheel of your listening; loudness profile; share of listening that was hi-res lossless or bit-perfect, which no streaming recap can claim.
 - **Places and gear**: headphones vs speaker vs car; Mac vs iPhone.
-- **Mixing**: hours DJ'd, transitions made, most harmonic blend, the pair of tracks you mixed together most, biggest tempo jump you pulled off.
+- **Mixing**: DJ Mix listening counts toward minutes and top tracks like any other play, and also gets its own section: hours DJ'd, transitions made, most harmonic blend, the pair of tracks you mixed together most, biggest tempo jump you pulled off.
 - **Sources**: share of listening from Bandcamp purchases, Internet Archive and Jamendo; most-played openly licensed track (with its license link).
 
 ## Recap pipeline (sketch)
@@ -150,33 +153,42 @@ None of these need new tracking. They are here to check the log is rich enough, 
 
 Because the engine only reads raw events, we can also offer "your recap so far" at any time, and regenerate past years with new editions.
 
-## Privacy
+## Sync and collection
 
-- Nothing leaves the device. There is no server to receive it.
-- Settings → Listening history: view recent events, **pause history** (a private session; plays are simply not written), **export** (JSON Lines, one event per line, same envelope), **delete** a date range or everything. Deletion physically removes rows; it is the one place append-only is broken, on purpose.
-- Search text, file paths and anything identifying the user are never recorded. `device_id` is random per install.
+History is collected to the user's Motif account, not only kept on the device. The device log stays the source of truth while offline; the server holds the merged log across all of a user's devices.
 
-## Multi-device (later)
+- **Service**: a small Motif-run service (Go + Postgres) with two endpoints. `POST /v1/events` takes a batch of events and is idempotent on `id`, so retries never duplicate. `GET /v1/events?after=<cursor>` returns events from the user's other devices. The server stores the same envelope and payload, append-only.
+- **Client**: a background uploader sends unsynced rows in batches (on launch, on network change, every few minutes while playing, and via `BGAppRefreshTask` on iOS / WorkManager on Android). Pulled events are inserted locally, so each device ends up with the full log and recaps work offline.
+- **Accounts**: Sign in with Apple and Google. Without an account, everything still works locally; signing in later uploads the whole backlog.
+- **Merging** is a set union: UUIDv7 ids are unique across devices and no event is ever edited, so there are no conflicts.
+- **Track identity across devices**: `track_id` is per install, so the same song on Mac and iPhone has two ids. Each track gets a `track_key` at import: a SHA-256 of the audio file's contents, which matches whenever the same file is imported on two devices. Recaps group plays by `track_key`, with a fallback match on normalized artist, title and duration for re-encoded copies. This needs a `content_hash` column added to the library schema.
+- **Transport**: TLS only, and the server encrypts at rest. Events carry no file paths or search text.
 
-UUIDv7 ids and a per-install `device_id` make syncing between a user's own devices a set union with no conflicts: each device sends the events the other lacks. No event is ever edited, so there is nothing to merge. A recap then covers all of a user's devices.
+## Privacy controls
+
+- **Pause history** is per app session: while paused, plays are not written at all. The next launch goes back to full tracking.
+- Settings → Listening history: view recent events, **export** (JSON Lines, one event per line, same envelope), **delete** a date range or everything. Deletion removes rows on the device and on the server; it is the one place append-only is broken, on purpose.
+- Search text, file paths and anything identifying the user beyond the account are never recorded. `device_id` is random per install.
 
 ## Gaps in today's code
 
 - The library has no `key` or `genre`. Key detection belongs in `core/dsp`; genre can come from file tags at import.
 - `play(_:startAt:)` doesn't know what started playback. It needs a `context` argument from each view.
 - `NowPlayingController` doesn't tell the engine a command came from the lock screen or headset; handlers need to pass that through.
+- Tracks have no content hash yet, so `track_key` needs a `content_hash` column and a hash step in `ImportService.ingest`.
 - No queue modes, likes or crates yet. Their events are listed so the names and shapes are settled before the features exist.
 
-## Questions for Pan
+## Decisions (Pan, 2026-10-07)
 
-1. Should DJ Mix listening count toward yearly minutes and top tracks, or be its own section of the recap?
-2. Pause history: per session only, or also a schedule (e.g. never record between midnight and 6 a.m.)?
-3. Is syncing history between your Mac and iPhone wanted for the first recap, or can each device recap alone at first?
+1. DJ Mix listening counts toward yearly minutes and top tracks, and also has its own recap section.
+2. Pause history lasts for the current session; reopening the app resumes full tracking.
+3. History is collected to the user's account and synced between devices, not kept only on the device.
 
 ## Implementation order
 
 1. `schemas/history.sql` and `schemas/events/*.v1.schema.json` for `play`, `track_added`, `track_analyzed`, `track_updated`, `track_removed`, `app_session`.
 2. `HistoryStore` in MotifKit (batched writer, `open_play` recovery, export, delete) and hooks in `PlaybackEngine`, `ImportService` and `LibraryStore`.
-3. Backfill: on first launch with history, write a `track_added` for every existing track, dated by its `added_at`.
-4. Transition and DJ events when the mixing engine lands.
-5. `core/recap` and the first edition, in time for December.
+3. Sync service (`services/sync`, Go) with accounts, the two event endpoints and delete-range, plus the client uploader and puller.
+4. Backfill: on first launch with history, write a `track_added` for every existing track, dated by its `added_at`.
+5. Transition and DJ events when the mixing engine lands.
+6. `core/recap` and the first edition, in time for December.
