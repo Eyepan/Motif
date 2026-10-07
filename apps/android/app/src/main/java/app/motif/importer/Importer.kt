@@ -10,6 +10,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import app.motif.data.LibraryStore
 import app.motif.data.Track
+import app.motif.data.cleanTag
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,7 +103,7 @@ class Importer(
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
-            fun meta(key: Int) = retriever.extractMetadata(key)?.trim()?.takeIf { it.isNotEmpty() }
+            fun meta(key: Int) = retriever.extractMetadata(key)?.let(::cleanTag)?.takeIf { it.isNotEmpty() }
             val mime = meta(MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
             if (mime != null && !mime.startsWith("audio/")) error("Not an audio file")
             var sampleRate: Int? = null

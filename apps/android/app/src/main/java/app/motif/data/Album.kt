@@ -8,7 +8,8 @@ class Album(val key: String, val title: String, val artist: String?, val tracks:
 
 /**
  * Albums in library order (newest first). Tracks group by album title alone,
- * compared without case or extra whitespace, so a soundtrack or
+ * compared by [albumKey] (case, whitespace, dash style and
+ * invisible characters ignored), so a soundtrack or
  * compilation whose songs credit different singers stays one album. The
  * album's artist is the one every credited track shares, else "Various artists".
  *
@@ -20,22 +21,42 @@ fun albumsOf(tracks: List<Track>): List<Album> =
     tracks.filter { !it.album.isNullOrBlank() }
         .groupBy { albumKey(it.album!!) }
         .map { (key, list) ->
-            val artists = list.mapNotNull { it.artist?.trim()?.takeIf(String::isNotEmpty) }.distinctBy(::albumKey)
+            val artists = list.mapNotNull { it.artist?.let(::cleanTag)?.takeIf(String::isNotEmpty) }.distinctBy(::albumKey)
             val artist = when {
                 artists.isEmpty() -> null
                 artists.size == 1 -> artists[0]
                 else -> "Various artists"
             }
-            Album(key, list[0].album!!.trim(), artist, list)
+            Album(key, cleanTag(list[0].album!!), artist, list)
         }
 
 /**
- * Comparison key for tag text: Unicode-normalized, trimmed, single-spaced and
- * case-folded. Combining marks are kept, since in scripts like Tamil they are
- * vowels, not accents.
+ * Tag text as it should be stored and shown: Unicode-normalized, with the
+ * invisible characters some taggers leave behind (byte-order marks,
+ * zero-width spaces, soft hyphens) removed, control characters such as NUL
+ * turned into spaces, and whitespace trimmed and collapsed. Joiners are kept
+ * because Indic scripts use them for rendering.
+ */
+fun cleanTag(text: String): String =
+    Normalizer.normalize(text, Normalizer.Form.NFKC)
+        .replace(INVISIBLE, "")
+        .replace(CONTROL, " ")
+        .replace(Regex(" {2,}"), " ")
+        .trim()
+
+/**
+ * Comparison key for tag text: [cleanTag], then every format character
+ * dropped, dashes unified, runs of any Unicode whitespace collapsed to one
+ * space, and case folded. Combining marks are kept, since in scripts like
+ * Tamil they are vowels, not accents.
  */
 fun albumKey(text: String): String =
-    Normalizer.normalize(text, Normalizer.Form.NFKC)
+    cleanTag(text)
+        .replace(Regex("\\p{Cf}+"), "")
+        .replace(Regex("\\p{Pd}"), "-")
+        .replace(Regex("[\\s\\p{Z}]+"), " ")
         .trim()
-        .replace(Regex("\\s+"), " ")
         .lowercase(Locale.ROOT)
+
+private val INVISIBLE = Regex("[\\uFEFF\\u200B\\u2060\\u00AD]+")
+private val CONTROL = Regex("\\p{Cc}+")

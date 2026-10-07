@@ -3,6 +3,7 @@ package app.motif
 import app.motif.data.LibraryFilter
 import app.motif.data.Track
 import app.motif.data.albumsOf
+import app.motif.data.cleanTag
 import app.motif.playback.Mixing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,6 +31,22 @@ class LibraryTest {
         assertEquals("Film OST", albums[0].title)
         assertEquals("Various artists", albums[0].artist)
         assertEquals(listOf("Song 1", "Song 2", "Song 3", "Song 4"), albums[0].tracks.map { it.title })
+    }
+
+    @Test fun invisibleTagDifferencesDoNotSplitAnAlbum() {
+        val albums = albumsOf(listOf(
+            song("1", "Composer - Site", "Film 2 - Site"),
+            song("2", "Composer, Singer - Site", "Film 2 - Site\u0000"),
+            song("3", "Singer B - Site", "\uFEFFFilm 2 - Site"),
+            song("4", "Singer C - Site", "Film\u00A02 \u2013 Site"),
+            song("5", "Singer D - Site", "Film 2\u200B - Site "),
+        ))
+        assertEquals(1, albums.size)
+        assertEquals("Film 2 - Site", albums[0].title)
+        assertEquals("Various artists", albums[0].artist)
+        assertEquals(5, albums[0].tracks.size)
+        assertEquals("Film 2 - Site", cleanTag("\uFEFFFilm 2 - Site\u0000"))
+        assertEquals("A B", cleanTag("A\u0000B"))
     }
 
     @Test fun albumsKeepOrderAndSharedArtist() {
