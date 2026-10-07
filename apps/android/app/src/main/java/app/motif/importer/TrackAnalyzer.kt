@@ -135,7 +135,7 @@ object TrackAnalyzer {
                 bpm = r[2].takeIf { it > 0 }?.toDouble(),
                 loudnessDb = r[1].takeIf { it.isFinite() }?.toDouble(),
                 camelotKey = if (camelot in 1..12) "$camelot${if (r[4] > 0f) "A" else "B"}" else null,
-                waveform = ByteArray(overview.size) { (overview[it] * 255).roundToInt().coerceIn(0, 255).toByte() },
+                waveform = ByteArray(overview.size) { overview[it].takeIf { v -> v.isFinite() }?.let { v -> (v * 255).roundToInt().coerceIn(0, 255) }?.toByte() ?: 0 },
                 firstDownbeat = r.getOrNull(5)?.takeIf { it >= 0f && r[2] > 0f }?.toDouble(),
             )
         } finally {

@@ -9,6 +9,8 @@ pub const HOP: usize = 512;
 /// Frames per hop of the envelope the beat grid is fitted to (about 3 ms).
 pub const FINE_HOP: usize = 128;
 const FINE_PER_HOP: usize = HOP / FINE_HOP;
+/// Float sources may go past full scale; anything beyond this is a decoding error.
+const MAX_SAMPLE: f32 = 8.0;
 
 use crate::beatgrid;
 use crate::key::{Key, KeyDetector};
@@ -64,6 +66,8 @@ impl Analyzer {
         for frame in interleaved.chunks_exact(ch) {
             let mut mono = 0.0f32;
             for &s in frame {
+                // A decoder glitch must not poison the whole track with NaN or infinity.
+                let s = if s.is_finite() { s.clamp(-MAX_SAMPLE, MAX_SAMPLE) } else { 0.0 };
                 self.peak = self.peak.max(s.abs());
                 self.sum_squares += (s as f64) * (s as f64);
                 mono += s;
@@ -242,6 +246,20 @@ mod tests {
         assert!((o[3] - 1.0).abs() < 1e-3);
         assert!((o[0] - 0.25).abs() < 1e-2);
         assert_eq!(Analyzer::new(44_100, 1).overview(3), vec![0.0; 3]);
+    }
+
+    #[test]
+    fn bad_samples_leave_results_finite() {
+        let mut a = Analyzer::new(44_100, 1);
+        let mut audio = click_track(120.0, 44_100, 20.0, 1);
+        audio[1000] = f32::NAN;
+        audio[2000] = f32::INFINITY;
+        audio[3000] = 1e30;
+        a.push(&audio);
+        assert!(a.overview(128).iter().all(|v| v.is_finite()));
+        let r = a.finish();
+        assert!((r.bpm - 120.0).abs() < 1.5, "bpm {}", r.bpm);
+        assert!(r.peak_db.is_finite() && r.rms_db.is_finite());
     }
 
     #[test]

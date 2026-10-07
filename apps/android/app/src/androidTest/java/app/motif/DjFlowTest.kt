@@ -69,7 +69,7 @@ class DjFlowTest {
                 val direct = runBlocking { runCatching { TrackAnalyzer.analyze(app.library.fileFor(t)) {} } }
                 fail(
                     "${t.title} has no beat grid: bpm ${t.bpm}, downbeat ${t.firstDownbeat}, analyse on import ${app.analyzeOnImport.value}, " +
-                        "DSP ${MotifDsp.available}, direct analysis ${direct.map { r -> r?.let { "bpm ${it.bpm} downbeat ${it.firstDownbeat} key ${it.camelotKey}" } }}",
+                        "DSP ${MotifDsp.available}, direct analysis ${direct.map { r -> r?.let { "bpm ${it.bpm} downbeat ${it.firstDownbeat} key ${it.camelotKey} loudness ${it.loudnessDb}" } }}",
                 )
             }
         }
