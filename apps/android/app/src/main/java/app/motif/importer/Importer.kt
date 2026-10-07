@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import app.motif.data.ArtworkStore
 import app.motif.data.LibraryStore
 import app.motif.data.RawTags
 import app.motif.data.TagCleaner
@@ -42,6 +43,7 @@ class ImportJob(val id: String, val fileName: String, val stage: Stage) {
 class Importer(
     private val context: Context,
     private val store: LibraryStore,
+    private val artwork: ArtworkStore,
     private val scope: CoroutineScope,
     private val analyzeOnImport: () -> Boolean,
 ) {
@@ -49,21 +51,30 @@ class Importer(
     val jobs: StateFlow<List<ImportJob>> = _jobs.asStateFlow()
     private val queue = Mutex()
 
-    fun importFiles(uris: List<Uri>) {
-        if (uris.isEmpty()) return
-        val pending = uris.map { ImportJob(UUID.randomUUID().toString(), displayName(it), ImportJob.Stage.Copying) to it }
-        _jobs.update { it + pending.map { p -> p.first } }
+    fun importFiles(uris: List<Uri>) = enqueue(uris.map { Picked(it, null) })
+
+    /**
+     * Imports every audio file under a picked folder (internal storage, SD card
+     * or USB drive). A cover.jpg or similar beside the files is their art when
+     * they have none embedded.
+     */
+    fun importFolder(tree: Uri) {
         scope.launch(Dispatchers.IO) {
-            queue.withLock { pending.forEach { (job, uri) -> run(job, uri) } }
+            val files = mutableListOf<Picked>()
+            collectAudio(tree, DocumentsContract.getTreeDocumentId(tree), files)
+            launch(Dispatchers.Main) { enqueue(files) }
         }
     }
 
-    /** Imports every audio file under a picked folder (internal storage, SD card or USB drive). */
-    fun importFolder(tree: Uri) {
+    /** An audio file to import and the folder cover image next to it, if any. */
+    private class Picked(val uri: Uri, val cover: Uri?)
+
+    private fun enqueue(picked: List<Picked>) {
+        if (picked.isEmpty()) return
+        val pending = picked.map { ImportJob(UUID.randomUUID().toString(), displayName(it.uri), ImportJob.Stage.Copying) to it }
+        _jobs.update { it + pending.map { p -> p.first } }
         scope.launch(Dispatchers.IO) {
-            val files = mutableListOf<Uri>()
-            collectAudio(tree, DocumentsContract.getTreeDocumentId(tree), files)
-            launch(Dispatchers.Main) { importFiles(files) }
+            queue.withLock { pending.forEach { (job, file) -> run(job, file.uri, file.cover) } }
         }
     }
 
@@ -93,9 +104,9 @@ class Importer(
         _jobs.update { list -> list.map { if (it.id == id) ImportJob(it.id, it.fileName, stage) else it } }
     }
 
-    private suspend fun run(job: ImportJob, uri: Uri) {
+    private suspend fun run(job: ImportJob, uri: Uri, cover: Uri?) {
         runCatching {
-            add(job, null, null) { dest ->
+            add(job, null, cover?.let(::readCover)) { dest ->
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { input.copyTo(it, 256 * 1024) }
                 } ?: error("Couldn't open the file")
@@ -131,7 +142,11 @@ class Importer(
         val album: String?,
     )
 
-    /** Puts the file in the media folder via [fill], reads it, saves it and analyses it. */
+    /**
+     * Puts the file in the media folder via [fill], reads it, saves it and
+     * analyses it. [cover] (a folder cover.jpg or the catalog's art) is used
+     * when the file has no embedded picture.
+     */
     private suspend fun add(job: ImportJob, info: SourceInfo?, cover: ByteArray?, fill: (File) -> Unit): Track {
         val ext = job.fileName.substringAfterLast('.', "").lowercase()
         val id = UUID.randomUUID().toString()
@@ -140,7 +155,8 @@ class Importer(
             fill(dest)
             val (read, raw) = readTrack(id, dest, job.fileName, info)
             var track = read
-            if (cover != null) runCatching { CatalogArt.save(cover, CatalogArt.fileFor(context.filesDir, id)) }
+            // Art first, so the row shows it as soon as the track appears.
+            artwork.extract(id, dest, fallback = cover)
             store.insert(track, raw)
 
             if (analyzeOnImport()) {
@@ -158,7 +174,7 @@ class Importer(
             return track
         } catch (e: Exception) {
             dest.delete()
-            CatalogArt.fileFor(context.filesDir, id).delete()
+            artwork.delete(id)
             setStage(job.id, ImportJob.Stage.Failed(e.message ?: "Import failed"))
             throw e
         }
@@ -228,19 +244,43 @@ class Importer(
         }
     }
 
-    private fun collectAudio(tree: Uri, docId: String, out: MutableList<Uri>) {
+    private fun collectAudio(tree: Uri, docId: String, out: MutableList<Picked>) {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
-        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        )
+        val audio = mutableListOf<Uri>()
+        val images = mutableMapOf<String, String>()
         context.contentResolver.query(children, projection, null, null, null)?.use { c ->
             while (c.moveToNext()) {
                 val id = c.getString(0)
                 val mime = c.getString(1) ?: ""
                 when {
                     mime == DocumentsContract.Document.MIME_TYPE_DIR -> collectAudio(tree, id, out)
-                    mime.startsWith("audio/") -> out += DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                    mime.startsWith("audio/") -> audio += DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                    mime.startsWith("image/") -> c.getString(2)?.let { images[it] = id }
                 }
             }
         }
+        val cover = ArtworkStore.pickFolderCover(images.keys.toList())?.let { DocumentsContract.buildDocumentUriUsingTree(tree, images[it]) }
+        audio.forEach { out += Picked(it, cover) }
+    }
+
+    /** The last folder cover read; a folder's tracks import one after another and share it. */
+    private var lastCover: Pair<Uri, ByteArray?>? = null
+
+    /** A folder cover's bytes, skipping anything implausibly large for a picture. */
+    private fun readCover(uri: Uri): ByteArray? {
+        lastCover?.let { (u, bytes) -> if (u == uri) return bytes }
+        val bytes = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.readBytes().takeIf { it.size <= 20 * 1024 * 1024 }
+            }
+        }.getOrNull()
+        lastCover = uri to bytes
+        return bytes
     }
 
     private fun displayName(uri: Uri): String =

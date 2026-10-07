@@ -125,7 +125,7 @@ fun LibraryScreen(
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(albums.take(10), key = { it.key }) { album ->
-                                    AlbumTile(album.title, album.artist, album.tracks[0].monogram) { onPlay(album.tracks, 0) }
+                                    AlbumTile(album.title, album.artist, album.tracks[0].monogram, album.tracks.map { it.id }) { onPlay(album.tracks, 0) }
                                 }
                             }
                         }
@@ -141,7 +141,7 @@ fun LibraryScreen(
                     ListItem(
                         headlineContent = { Text(album.title) },
                         supportingContent = { Text("${album.artist ?: "Unknown artist"} · ${album.tracks.size} songs") },
-                        leadingContent = { ArtTile(album.title, album.tracks[0].monogram, size = 56.dp, radius = 8.dp) },
+                        leadingContent = { ArtTile(album.title, album.tracks[0].monogram, size = 56.dp, radius = 8.dp, artIds = album.tracks.map { it.id }) },
                         colors = ListItemDefaults.colors(containerColor = Motif.ground),
                         modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(album.tracks, 0) },
                     )

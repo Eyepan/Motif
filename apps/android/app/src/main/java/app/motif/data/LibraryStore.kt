@@ -151,6 +151,8 @@ class LibraryStore(private val context: Context) {
         refresh()
     }
 
+    // Synchronized so a refresh that read the table earlier can't publish after a later one.
+    @Synchronized
     private fun refresh() {
         helper.readableDatabase.rawQuery("SELECT * FROM tracks ORDER BY added_at DESC, title", null).use { c ->
             val list = ArrayList<Track>(c.count)

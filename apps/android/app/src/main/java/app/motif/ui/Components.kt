@@ -2,6 +2,7 @@ package app.motif.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,15 +25,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -41,16 +49,62 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.motif.data.ArtworkStore
 import app.motif.data.Track
 import app.motif.playback.MixMatch
 import app.motif.ui.theme.Motif
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-/** Flat colour tile with the title's first letter, standing in for album art. */
+/** The artwork store for [ArtTile]; provided by MotifRoot. Null in previews, which then show the letter tile. */
+val LocalArtwork = staticCompositionLocalOf<ArtworkStore?> { null }
+
+/**
+ * The album art for the first of [trackIds] that has any, decoded off the main
+ * thread at about [sizePx]; null while loading or when none has art.
+ */
 @Composable
-fun ArtTile(seed: String, letter: String, size: Dp = 44.dp, radius: Dp = 6.dp, modifier: Modifier = Modifier) {
+fun rememberArtwork(trackIds: List<String>, sizePx: Int): ImageBitmap? {
+    val store = LocalArtwork.current ?: return null
+    val available by store.available.collectAsStateWithLifecycle()
+    val id = trackIds.firstOrNull { it in available } ?: return null
+    // Start from the memory cache, so scrolling back to a row doesn't flash its letter tile.
+    val cached = remember(id, sizePx) { store.cached(id, sizePx)?.asImageBitmap() }
+    val bitmap by produceState(cached, id, sizePx) {
+        value = cached ?: withContext(Dispatchers.IO) { store.load(id, sizePx)?.asImageBitmap() }
+    }
+    return bitmap
+}
+
+/**
+ * Album art from the first of [artIds] (track ids) that has any; otherwise a
+ * flat colour tile with the title's first letter.
+ */
+@Composable
+fun ArtTile(
+    seed: String,
+    letter: String,
+    size: Dp = 44.dp,
+    radius: Dp = 6.dp,
+    modifier: Modifier = Modifier,
+    artIds: List<String> = emptyList(),
+) {
+    val px = with(LocalDensity.current) { size.roundToPx() }
+    val art = rememberArtwork(artIds, px)
+    val shape = RoundedCornerShape(radius)
+    if (art != null) {
+        Image(
+            art,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.size(size).clip(shape).clearAndSetSemantics {},
+        )
+        return
+    }
     val (bg, fg) = remember(seed) { Motif.artColors(seed) }
     Box(
-        modifier.size(size).background(bg, RoundedCornerShape(radius)).clearAndSetSemantics {},
+        modifier.size(size).background(bg, shape).clearAndSetSemantics {},
         contentAlignment = Alignment.Center,
     ) {
         Text(letter, color = fg, fontWeight = FontWeight.Bold, fontSize = (size.value / 2.6f).sp)
@@ -81,12 +135,12 @@ fun SectionHeader(title: String, detail: String? = null, modifier: Modifier = Mo
 }
 
 @Composable
-fun AlbumTile(title: String, artist: String?, letter: String, onClick: () -> Unit) {
+fun AlbumTile(title: String, artist: String?, letter: String, artIds: List<String> = emptyList(), onClick: () -> Unit) {
     Column(
         Modifier.width(132.dp).clickable(onClick = onClick),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        ArtTile(title, letter, size = 132.dp, radius = 10.dp)
+        ArtTile(title, letter, size = 132.dp, radius = 10.dp, artIds = artIds)
         Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (artist != null) Text(artist, fontSize = 12.sp, color = Motif.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -130,7 +184,7 @@ fun TrackRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ArtTile(track.artSeed, track.monogram)
+            ArtTile(track.artSeed, track.monogram, artIds = listOf(track.id))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     track.title, fontSize = 16.sp, color = if (isCurrent) Motif.accent else Motif.text,

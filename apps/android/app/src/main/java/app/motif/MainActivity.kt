@@ -7,9 +7,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import app.motif.playback.PlaybackService
+import app.motif.ui.LocalArtwork
 import app.motif.ui.MotifRoot
 import app.motif.ui.theme.MotifTheme
 import com.google.common.util.concurrent.ListenableFuture
@@ -25,7 +27,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val app = application as MotifApp
         setContent {
-            MotifTheme { MotifRoot(app) }
+            MotifTheme {
+                CompositionLocalProvider(LocalArtwork provides app.artwork) { MotifRoot(app) }
+            }
         }
     }
 

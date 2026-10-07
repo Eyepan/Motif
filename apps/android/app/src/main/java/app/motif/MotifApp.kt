@@ -2,10 +2,10 @@ package app.motif
 
 import android.app.Application
 import android.content.Context
+import app.motif.data.ArtworkStore
 import app.motif.data.LibraryStore
 import app.motif.data.Track
 import app.motif.dsp.MotifDsp
-import app.motif.importer.CatalogArt
 import app.motif.importer.Downloads
 import app.motif.importer.Importer
 import app.motif.playback.DjEngine
@@ -28,15 +28,19 @@ class MotifApp : Application() {
     private val prefs by lazy { getSharedPreferences("motif", Context.MODE_PRIVATE) }
 
     val library: LibraryStore by lazy {
-        LibraryStore(this).also {
+        LibraryStore(this).also { store ->
             scope.launch {
-                it.load()
+                store.load()
+                // Art for tracks imported before it was extracted.
+                artwork.sync(store.tracks.value, store::fileFor)
                 if (!prefs.getBoolean(KEY_GRIDS_BACKFILLED, false) && MotifDsp.available) {
-                    importer.backfillBeatGrids(it.tracks.value) { prefs.edit().putBoolean(KEY_GRIDS_BACKFILLED, true).apply() }
+                    importer.backfillBeatGrids(store.tracks.value) { prefs.edit().putBoolean(KEY_GRIDS_BACKFILLED, true).apply() }
                 }
             }
         }
     }
+
+    val artwork: ArtworkStore by lazy { ArtworkStore(filesDir) }
 
     private val _analyzeOnImport by lazy { MutableStateFlow(prefs.getBoolean(KEY_ANALYZE, true)) }
     val analyzeOnImport: StateFlow<Boolean> get() = _analyzeOnImport.asStateFlow()
@@ -46,7 +50,7 @@ class MotifApp : Application() {
         prefs.edit().putBoolean(KEY_ANALYZE, on).apply()
     }
 
-    val importer: Importer by lazy { Importer(this, library, scope) { _analyzeOnImport.value } }
+    val importer: Importer by lazy { Importer(this, library, artwork, scope) { _analyzeOnImport.value } }
 
     /** Built in from `JAMENDO_CLIENT_ID`, or pasted in Discover. */
     private val _jamendoClientId by lazy {
@@ -69,7 +73,7 @@ class MotifApp : Application() {
     val previewer by lazy { Previewer(this) }
 
     val playback: PlaybackEngine by lazy {
-        PlaybackEngine(this, library, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
+        PlaybackEngine(this, library, artwork, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
             prefs.edit().putBoolean(KEY_MIX, on).apply()
         }
     }
@@ -92,7 +96,7 @@ class MotifApp : Application() {
         if (djStarted) dj.remove(track)
         scope.launch {
             library.delete(track)
-            CatalogArt.fileFor(filesDir, track.id).delete()
+            artwork.delete(track.id)
         }
     }
 
