@@ -101,7 +101,7 @@ impl Analyzer {
 
     /// Energy per `HOP` frames, summed from the fine envelope.
     fn coarse_envelope(&self) -> Vec<f32> {
-        self.envelope.chunks_exact(FINE_PER_HOP).map(|c| c.iter().sum()).collect()
+        self.envelope.as_chunks::<FINE_PER_HOP>().0.iter().map(|c| c.iter().sum()).collect()
     }
 }
 
