@@ -55,6 +55,7 @@ struct MacLibraryTable: View {
             .width(min: 44, ideal: 54, max: 70)
             TableColumn("BPM", value: \.track.sortBPM) { row in
                 Text(row.track.bpm.map { "\(Int($0.rounded()))" } ?? "—").font(Theme.mono(12))
+                    .foregroundStyle(Theme.bpmColor(row.track.bpm))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .width(min: 40, ideal: 50, max: 64)

@@ -162,7 +162,7 @@ struct TrackRow: View {
             .lineLimit(1)
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(track.bpmText).foregroundStyle(Theme.secondary)
+                Text(track.bpmText).foregroundStyle(Theme.bpmColor(track.bpm))
                 Text(track.musicalKey ?? "—").foregroundStyle(Theme.keyColor(track.musicalKey))
             }
             .font(Theme.mono(12))

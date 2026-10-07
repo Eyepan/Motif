@@ -221,7 +221,7 @@ private fun QueueSheet(state: PlayerState, engine: PlaybackEngine, onDismiss: ()
         Text("Up Next", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         LazyColumn(Modifier.fillMaxHeight(0.7f)) {
             itemsIndexed(state.queue, key = { i, t -> "$i-${t.id}" }) { index, track ->
-                TrackRow(track, index == state.currentIndex, onClick = { engine.skipTo(index) })
+                TrackRow(track, index == state.currentIndex, onClick = { engine.skipTo(index) }, mixWith = state.current)
             }
         }
     }

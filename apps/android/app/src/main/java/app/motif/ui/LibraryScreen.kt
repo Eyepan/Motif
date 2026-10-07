@@ -58,7 +58,7 @@ private enum class Segment(val label: String) { Songs("Songs"), Albums("Albums")
 @Composable
 fun LibraryScreen(
     tracks: List<Track>,
-    currentId: String?,
+    current: Track?,
     onPlay: (List<Track>, Int) -> Unit,
     onDelete: (Track) -> Unit,
     onImport: () -> Unit,
@@ -132,7 +132,7 @@ fun LibraryScreen(
                         SectionHeader("Songs", "${songs.size} · ${if (songs.all(Track::isLossless)) "lossless" else "on device"}")
                     }
                     itemsIndexed(songs, key = { _, t -> t.id }) { index, track ->
-                        TrackRow(track, track.id == currentId, onClick = { onPlay(songs, index) }, onDelete = { onDelete(track) })
+                        TrackRow(track, track.id == current?.id, onClick = { onPlay(songs, index) }, onDelete = { onDelete(track) }, mixWith = current)
                     }
                 }
                 Segment.Albums -> items(albums, key = { it.key }) { album ->
