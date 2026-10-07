@@ -49,17 +49,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.motif.data.LibraryFilter
 import app.motif.data.Track
+import app.motif.data.albumsOf
 import app.motif.ui.theme.Motif
 
 private enum class Segment(val label: String) { Songs("Songs"), Albums("Albums"), Artists("Artists"), Crates("Crates") }
-
-class Album(val title: String, val artist: String?, val tracks: List<Track>)
-
-/** Albums in library order (newest first), tracks grouped by album title + artist. */
-fun albumsOf(tracks: List<Track>): List<Album> =
-    tracks.filter { it.album != null }
-        .groupBy { it.album!! to it.artist }
-        .map { (k, v) -> Album(k.first, k.second, v) }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -129,7 +122,7 @@ fun LibraryScreen(
                         item { SectionHeader("Recently added", "All on device") }
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                items(albums.take(10), key = { it.title + it.artist }) { album ->
+                                items(albums.take(10), key = { it.key }) { album ->
                                     AlbumTile(album.title, album.artist, album.tracks[0].monogram) { onPlay(album.tracks, 0) }
                                 }
                             }
@@ -142,7 +135,7 @@ fun LibraryScreen(
                         TrackRow(track, track.id == currentId, onClick = { onPlay(songs, index) }, onDelete = { onDelete(track) })
                     }
                 }
-                Segment.Albums -> items(albums, key = { it.title + it.artist }) { album ->
+                Segment.Albums -> items(albums, key = { it.key }) { album ->
                     ListItem(
                         headlineContent = { Text(album.title) },
                         supportingContent = { Text("${album.artist ?: "Unknown artist"} · ${album.tracks.size} songs") },
