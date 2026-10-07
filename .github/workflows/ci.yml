@@ -17,9 +17,21 @@ jobs:
 
   apple:
     runs-on: macos-15
-    defaults:
-      run:
-        working-directory: apps/apple
     steps:
       - uses: actions/checkout@v4
-      - run: swift test
+      - name: Build MotifDSP.xcframework
+        run: core/dsp/scripts/build-apple.sh
+      - name: MotifKit tests
+        working-directory: apps/apple
+        run: swift test
+      - name: Generate Xcode project
+        working-directory: apps/apple
+        run: |
+          brew install xcodegen
+          xcodegen
+      - name: Build app for macOS
+        working-directory: apps/apple
+        run: xcodebuild build -project Motif.xcodeproj -scheme Motif -destination 'generic/platform=macOS' CODE_SIGNING_ALLOWED=NO
+      - name: Build app for iOS Simulator
+        working-directory: apps/apple
+        run: xcodebuild build -project Motif.xcodeproj -scheme Motif -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO

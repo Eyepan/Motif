@@ -12,19 +12,28 @@ public actor LibraryStore {
         }
     }
 
+    static let schemaVersion: Int32 = 2
+
     static let schema = """
     CREATE TABLE IF NOT EXISTS tracks (
         id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT, album TEXT,
         duration_ms INTEGER NOT NULL DEFAULT 0, file_path TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
         sample_rate INTEGER, bit_depth INTEGER, channels INTEGER, source TEXT NOT NULL, source_ref TEXT,
-        license_url TEXT, bpm REAL, loudness_db REAL, added_at INTEGER NOT NULL
+        license_url TEXT, bpm REAL, loudness_db REAL, musical_key TEXT, waveform BLOB, added_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS tracks_artist_album ON tracks(artist, album);
     CREATE INDEX IF NOT EXISTS tracks_added_at ON tracks(added_at DESC);
-    PRAGMA user_version = 1;
     """
 
-    private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, added_at"
+    /// Steps from version N-1 to N, applied to databases created before N.
+    private static let migrations: [Int32: String] = [
+        2: "ALTER TABLE tracks ADD COLUMN musical_key TEXT; ALTER TABLE tracks ADD COLUMN waveform BLOB;",
+    ]
+
+    /// Bytes in `Track.waveform`.
+    public static let waveformLength = 128
+
+    private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at"
 
     /// Where imported audio files live. Track.filePath is relative to this.
     public nonisolated let mediaDirectory: URL
@@ -57,7 +66,30 @@ public actor LibraryStore {
         }
         db = handle
         try Self.exec(handle, "PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
-        try Self.exec(handle, Self.schema)
+        try Self.migrate(handle)
+    }
+
+    private static func migrate(_ db: OpaquePointer) throws {
+        var stmt: OpaquePointer?
+        sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &stmt, nil)
+        let current = sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) : 0
+        sqlite3_finalize(stmt)
+        guard current < schemaVersion else { return }
+
+        try exec(db, "BEGIN")
+        do {
+            if current == 0 {
+                try exec(db, schema)
+            } else {
+                for version in (current + 1)...schemaVersion {
+                    if let step = migrations[version] { try exec(db, step) }
+                }
+            }
+            try exec(db, "PRAGMA user_version = \(schemaVersion); COMMIT")
+        } catch {
+            try? exec(db, "ROLLBACK")
+            throw error
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -79,13 +111,14 @@ public actor LibraryStore {
     }
 
     public func upsert(_ t: Track) throws {
-        let placeholders = (1...16).map { "?\($0)" }.joined(separator: ", ")
+        let placeholders = (1...18).map { "?\($0)" }.joined(separator: ", ")
         try run(
             "INSERT OR REPLACE INTO tracks (\(Self.columns)) VALUES (\(placeholders))",
             bind: [
                 t.id.uuidString, t.title, t.artist, t.album, t.durationMs, t.filePath, t.format,
                 t.sampleRate, t.bitDepth, t.channels, t.source.rawValue, t.sourceRef,
-                t.licenseURL?.absoluteString, t.bpm, t.loudnessDb, Int(t.addedAt.timeIntervalSince1970),
+                t.licenseURL?.absoluteString, t.bpm, t.loudnessDb, t.musicalKey, t.waveform.map { Data($0) },
+                Int(t.addedAt.timeIntervalSince1970),
             ]
         )
     }
@@ -96,8 +129,11 @@ public actor LibraryStore {
         try? FileManager.default.removeItem(at: url(for: track))
     }
 
-    public func updateAnalysis(id: UUID, bpm: Double?, loudnessDb: Double?) throws {
-        try run("UPDATE tracks SET bpm = ?1, loudness_db = ?2 WHERE id = ?3", bind: [bpm, loudnessDb, id.uuidString])
+    public func updateAnalysis(id: UUID, _ analysis: TrackAnalysis) throws {
+        try run(
+            "UPDATE tracks SET bpm = ?1, loudness_db = ?2, musical_key = ?3, waveform = ?4 WHERE id = ?5",
+            bind: [analysis.bpm, analysis.loudnessDb, analysis.musicalKey, Data(analysis.waveform), id.uuidString]
+        )
     }
 
     // MARK: - SQLite plumbing
@@ -123,6 +159,8 @@ public actor LibraryStore {
             case let v as String: sqlite3_bind_text(stmt, idx, v, -1, transient)
             case let v as Int: sqlite3_bind_int64(stmt, idx, Int64(v))
             case let v as Double: sqlite3_bind_double(stmt, idx, v)
+            case let v as Data:
+                _ = v.withUnsafeBytes { sqlite3_bind_blob(stmt, idx, $0.baseAddress, Int32($0.count), transient) }
             default:
                 sqlite3_finalize(stmt)
                 preconditionFailure("Unsupported bind type \(type(of: value))")
@@ -160,6 +198,10 @@ public actor LibraryStore {
         func double(_ i: Int32) -> Double? {
             sqlite3_column_type(s, i) == SQLITE_NULL ? nil : sqlite3_column_double(s, i)
         }
+        func bytes(_ i: Int32) -> [UInt8]? {
+            guard sqlite3_column_type(s, i) != SQLITE_NULL, let p = sqlite3_column_blob(s, i) else { return nil }
+            return Array(UnsafeRawBufferPointer(start: p, count: Int(sqlite3_column_bytes(s, i))))
+        }
         return Track(
             id: UUID(uuidString: text(0) ?? "") ?? UUID(),
             title: text(1) ?? "",
@@ -176,7 +218,9 @@ public actor LibraryStore {
             licenseURL: text(12).flatMap(URL.init(string:)),
             bpm: double(13),
             loudnessDb: double(14),
-            addedAt: Date(timeIntervalSince1970: TimeInterval(int(15) ?? 0))
+            musicalKey: text(15),
+            waveform: bytes(16),
+            addedAt: Date(timeIntervalSince1970: TimeInterval(int(17) ?? 0))
         )
     }
 

@@ -15,11 +15,31 @@ struct MotifApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(model)
-                .task { await model.refresh() }
+            Group {
+                #if os(macOS)
+                MacRootView()
+                #else
+                PhoneRootView()
+                #endif
+            }
+            .environment(model)
+            .tint(Theme.accent)
+            .preferredColorScheme(.dark)
+            .task {
+                await model.refresh()
+                await model.analyzeMissing()
+            }
+            .alert("Something went wrong", isPresented: Binding(
+                get: { model.errorMessage != nil },
+                set: { if !$0 { model.errorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(model.errorMessage ?? "")
+            }
         }
         #if os(macOS)
+        .defaultSize(width: 1280, height: 800)
         .commands {
             CommandMenu("Playback") {
                 Button("Play/Pause") { model.player.togglePlayPause() }
@@ -31,40 +51,5 @@ struct MotifApp: App {
             }
         }
         #endif
-    }
-}
-
-@MainActor
-@Observable
-final class AppModel {
-    let store: LibraryStore
-    let player: PlaybackEngine
-    let importer: ImportService
-    let sources: [any MusicSource]
-
-    private(set) var tracks: [Track] = []
-    var errorMessage: String?
-
-    init(store: LibraryStore) {
-        self.store = store
-        player = PlaybackEngine(store: store)
-        importer = ImportService(store: store)
-        let jamendo = JamendoSource()
-        sources = [InternetArchiveSource()] + (jamendo.isConfigured ? [jamendo] : [])
-    }
-
-    func refresh() async {
-        do { tracks = try await store.allTracks() } catch { errorMessage = error.localizedDescription }
-    }
-
-    func importLocal(_ urls: [URL]) async {
-        do { try await importer.importLocal(urls) } catch { errorMessage = error.localizedDescription }
-        await refresh()
-    }
-
-    func delete(_ track: Track) async {
-        if player.current?.id == track.id { player.stop() }
-        do { try await store.delete(track) } catch { errorMessage = error.localizedDescription }
-        await refresh()
     }
 }

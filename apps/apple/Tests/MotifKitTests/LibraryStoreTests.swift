@@ -21,11 +21,40 @@ import Testing
         #expect(try await store.search("goldberg").count == 1)
         #expect(try await store.search("mozart").isEmpty)
 
-        try await store.updateAnalysis(id: track.id, bpm: 72.5, loudnessDb: -14)
-        #expect(try await store.allTracks().first?.bpm == 72.5)
+        let analysis = TrackAnalysis(bpm: 72.5, loudnessDb: -14, musicalKey: "8A", waveform: [0, 128, 255])
+        try await store.updateAnalysis(id: track.id, analysis)
+        let analyzed = try await store.allTracks().first
+        #expect(analyzed?.bpm == 72.5)
+        #expect(analyzed?.musicalKey == "8A")
+        #expect(analyzed?.waveform == [0, 128, 255])
 
         try await store.delete(track)
         #expect(try await store.allTracks().isEmpty)
+    }
+
+    @Test func migratesVersionOneDatabase() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        var db: OpaquePointer?
+        sqlite3_open(dir.appending(path: "library.sqlite").path(percentEncoded: false), &db)
+        let v1 = """
+        CREATE TABLE tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, artist TEXT, album TEXT,
+            duration_ms INTEGER NOT NULL DEFAULT 0, file_path TEXT NOT NULL UNIQUE, format TEXT NOT NULL,
+            sample_rate INTEGER, bit_depth INTEGER, channels INTEGER, source TEXT NOT NULL, source_ref TEXT,
+            license_url TEXT, bpm REAL, loudness_db REAL, added_at INTEGER NOT NULL);
+        INSERT INTO tracks (id, title, file_path, format, source, added_at)
+            VALUES ('\(UUID().uuidString)', 'Old', 'old.wav', 'wav', 'local', 0);
+        PRAGMA user_version = 1;
+        """
+        #expect(sqlite3_exec(db, v1, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+
+        let store = try LibraryStore(directory: dir)
+        let tracks = try await store.allTracks()
+        #expect(tracks.map(\.title) == ["Old"])
+        #expect(tracks.first?.musicalKey == nil)
     }
 
     /// The embedded schema must define the same columns as schemas/library.sql.

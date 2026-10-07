@@ -1,7 +1,25 @@
 import AVFoundation
 
+/// Progress for one file moving through an import.
+public struct ImportEvent: Sendable {
+    public enum Stage: Sendable, Equatable {
+        case copying
+        case analyzing
+        case done(Track)
+        case failed(String)
+    }
+
+    /// Stable for the life of one file's import.
+    public let jobID: UUID
+    public let fileName: String
+    public let stage: Stage
+}
+
+public typealias ImportProgress = @Sendable (ImportEvent) async -> Void
+
 /// Copies audio into the library's media directory, reads its tags and format,
-/// and records it. Every source funnels through here.
+/// records it, then runs on-device analysis (BPM, key, loudness, waveform).
+/// Files are copied bit for bit; nothing is transcoded. Every source funnels through here.
 public struct ImportService: Sendable {
     public static let supportedExtensions: Set<String> = ["flac", "wav", "wave", "aif", "aiff", "m4a", "caf", "mp3"]
 
@@ -13,24 +31,52 @@ public struct ImportService: Sendable {
         self.session = session
     }
 
-    /// Imports files the user picked (Files app, Finder, a Bandcamp download).
-    /// Folders are walked recursively. Returns the tracks added.
+    /// Imports files the user picked (Files app, Finder, USB drives, a Bandcamp download).
+    /// Folders are walked recursively. A file that fails is reported and skipped.
+    /// Returns the tracks added.
     @discardableResult
-    public func importLocal(_ urls: [URL]) async throws -> [Track] {
+    public func importLocal(_ urls: [URL], analyze: Bool = true, progress: ImportProgress? = nil) async -> [Track] {
         var added: [Track] = []
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             for file in Self.audioFiles(at: url) {
-                added.append(try await ingest(copyFrom: file, source: .local, sourceRef: nil, licenseURL: nil, fallbackTitle: nil))
+                let job = UUID()
+                let name = file.lastPathComponent
+                await progress?(ImportEvent(jobID: job, fileName: name, stage: .copying))
+                do {
+                    var track = try await ingest(copyFrom: file, source: .local, sourceRef: nil, licenseURL: nil, fallbackTitle: nil)
+                    if analyze {
+                        await progress?(ImportEvent(jobID: job, fileName: name, stage: .analyzing))
+                        track = await self.analyze(track)
+                    }
+                    added.append(track)
+                    await progress?(ImportEvent(jobID: job, fileName: name, stage: .done(track)))
+                } catch {
+                    await progress?(ImportEvent(jobID: job, fileName: name, stage: .failed(error.localizedDescription)))
+                }
             }
         }
         return added
     }
 
+    /// Runs DSP analysis and stores the result. Analysis failures leave the track as it was.
+    public func analyze(_ track: Track) async -> Track {
+        let url = await store.url(for: track)
+        guard let analysis = try? TrackAnalyzer.analyze(url) else { return track }
+        try? await store.updateAnalysis(id: track.id, analysis)
+        var updated = track
+        updated.bpm = analysis.bpm
+        updated.loudnessDb = analysis.loudnessDb
+        updated.musicalKey = analysis.musicalKey
+        updated.waveform = analysis.waveform
+        return updated
+    }
+
     /// Downloads one file from a catalog and adds it.
     @discardableResult
-    public func importDownload(_ download: SourceDownload, from source: Track.Source, result: SourceResult) async throws -> Track {
+    public func importDownload(_ download: SourceDownload, from source: Track.Source, result: SourceResult,
+                               analyze: Bool = true) async throws -> Track {
         let (tempURL, response) = try await session.download(from: download.url)
         defer { try? FileManager.default.removeItem(at: tempURL) }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
@@ -47,6 +93,7 @@ public struct ImportService: Sendable {
             track.album = track.album ?? result.album
             try await store.upsert(track)
         }
+        if analyze { return await self.analyze(track) }
         return track
     }
 
