@@ -35,13 +35,13 @@ public final class PlaybackEngine {
 
     /// Blend length for a track: 16 bars at its tempo, clamped to 8...32 s
     /// and to a third of the track.
-    public static func mixLength(for track: Track) -> TimeInterval {
+    public nonisolated static func mixLength(for track: Track) -> TimeInterval {
         let bars = track.bpm.map { 16 * 4 * 60 / $0 } ?? 16
         return min(max(bars, 8), 32, track.duration / 3)
     }
 
     /// Largest tempo change applied to the incoming track, as a fraction.
-    public static let maxTempoAdjust = 0.08
+    public nonisolated static let maxTempoAdjust = 0.08
 
     private let store: LibraryStore
     private let engine = AVAudioEngine()
@@ -300,7 +300,7 @@ public final class PlaybackEngine {
 
     /// Playback rate that brings `incoming` to `outgoing`'s tempo, within
     /// `maxTempoAdjust`. Half and double time count as matches.
-    public static func tempoRatio(from outgoing: Track?, to incoming: Track) -> Double {
+    public nonisolated static func tempoRatio(from outgoing: Track?, to incoming: Track) -> Double {
         guard let a = outgoing?.bpm, let b = incoming.bpm, a > 0, b > 0 else { return 1 }
         let candidates = [a / b, a * 2 / b, a / (2 * b)]
         let best = candidates.min { abs($0 - 1) < abs($1 - 1) } ?? 1
