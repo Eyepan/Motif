@@ -9,6 +9,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import app.motif.data.ArtworkStore
 import app.motif.data.LibraryStore
 import app.motif.data.Track
 import app.motif.dsp.MotifDsp
@@ -49,6 +50,7 @@ data class PlayerState(
 class PlaybackEngine(
     private val context: Context,
     private val store: LibraryStore,
+    private val artwork: ArtworkStore,
     private val scope: CoroutineScope,
     initialMixIntoNext: Boolean,
     private val onMixIntoNextChanged: (Boolean) -> Unit,
@@ -253,6 +255,8 @@ class PlaybackEngine(
                     .setTitle(track.title)
                     .setArtist(track.artist)
                     .setAlbumTitle(track.album)
+                    // The notification, lock screen and Bluetooth displays show it.
+                    .setArtworkUri(if (track.id in artwork.available.value) Uri.fromFile(artwork.fileFor(track.id)) else null)
                     .setIsPlayable(true)
                     .build(),
             )
