@@ -151,7 +151,7 @@ fun DjScreen(dj: DjEngine, tracks: List<Track>, modifier: Modifier = Modifier) {
 private fun harmonicMatch(deck: DeckState, track: Track): Boolean {
     val ref = deck.track ?: return false
     if (track.id == ref.id) return false
-    val keyOk = ref.musicalKey == null || track.musicalKey in ref.compatibleKeys
+    val keyOk = ref.musicalKey == null || track.musicalKey?.let { it in ref.compatibleKeys } == true
     val bpm = deck.bpm
     val bpmOk = bpm == null || track.bpm?.let { abs(it - bpm) <= 4 } == true
     return keyOk && bpmOk

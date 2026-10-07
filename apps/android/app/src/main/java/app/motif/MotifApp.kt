@@ -21,7 +21,7 @@ class MotifApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val prefs by lazy { getSharedPreferences("motif", Context.MODE_PRIVATE) }
 
-    val library by lazy {
+    val library: LibraryStore by lazy {
         LibraryStore(this).also {
             scope.launch {
                 it.load()
@@ -40,9 +40,9 @@ class MotifApp : Application() {
         prefs.edit().putBoolean(KEY_ANALYZE, on).apply()
     }
 
-    val importer by lazy { Importer(this, library, scope) { _analyzeOnImport.value } }
+    val importer: Importer by lazy { Importer(this, library, scope) { _analyzeOnImport.value } }
 
-    val playback by lazy {
+    val playback: PlaybackEngine by lazy {
         PlaybackEngine(this, library, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
             prefs.edit().putBoolean(KEY_MIX, on).apply()
         }
@@ -51,7 +51,7 @@ class MotifApp : Application() {
     private var djStarted = false
 
     /** The DJ Mix decks. Starting a deck pauses regular playback, and the other way round. */
-    val dj by lazy {
+    val dj: DjEngine by lazy {
         djStarted = true
         DjEngine(this, library, scope) { playback.pause() }
     }
