@@ -21,6 +21,7 @@ name = "motif-server"
 path = "src/bin/motif-server.rs"
 
 [dependencies]
+argon2 = "0.6"
 axum = "0.8"
 base64 = "0.22"
 jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs", "use_pem"] }

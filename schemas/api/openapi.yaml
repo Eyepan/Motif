@@ -4,7 +4,7 @@
 openapi: 3.1.0
 info:
   title: Motif sync API
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: http://localhost:8080
     description: motif-server on a developer machine
@@ -18,10 +18,51 @@ paths:
       responses:
         "200": { description: Healthy, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
         "503": { description: Database unreachable, content: { application/json: { schema: { $ref: "#/components/schemas/Health" } } } }
+  /v1/auth/register:
+    post:
+      summary: Create an account with a username and password
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Credentials" } } }
+      responses:
+        "201": { description: Account created and signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/auth/login:
+    post:
+      summary: Sign in with a username and password
+      description: An unknown username and a wrong password both return 401 with the same message. Ten wrong passwords in a row lock the username for 15 minutes (429).
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Credentials" } } }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/auth/password:
+    post:
+      summary: Change the password
+      description: Signs out every other session of this account and returns a new session for this device.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8 }
+      responses:
+        "200": { description: Password changed, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
   /v1/auth/token:
     post:
       summary: Exchange a provider ID token for a Motif session
-      description: Creates the account on first sign-in. The ID token comes from Sign in with Apple or Google Sign-In on the device.
+      description: Off unless the server is configured with Apple or Google audiences. Creates the account on first sign-in.
       security: []
       requestBody:
         required: true
@@ -71,6 +112,7 @@ paths:
                 required: [user_id, identities]
                 properties:
                   user_id: { type: string, format: uuid }
+                  username: { type: [string, "null"] }
                   identities:
                     type: array
                     items:
@@ -155,7 +197,7 @@ components:
                 type: object
                 required: [code, message]
                 properties:
-                  code: { type: string, enum: [bad_request, unauthorized, not_found, unavailable, internal] }
+                  code: { type: string, enum: [bad_request, unauthorized, not_found, conflict, too_many_requests, unavailable, internal] }
                   message: { type: string }
   schemas:
     Health:
@@ -165,6 +207,12 @@ components:
         status: { type: string, enum: [ok, degraded] }
         version: { type: string }
         database: { type: string, enum: [ok, unreachable] }
+    Credentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$", description: Case-insensitive }
+        password: { type: string, minLength: 8, description: At most 256 bytes }
     RefreshRequest:
       type: object
       required: [refresh_token]

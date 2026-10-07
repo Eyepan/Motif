@@ -235,3 +235,128 @@ fn strips_the_function_prefix() {
     );
     assert_eq!(req.uri(), "/health");
 }
+
+#[tokio::test]
+async fn password_accounts() {
+    let Some(app) = app().await else { return };
+    let name = format!("Pan-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let creds = json!({"username": name, "password": "correct horse"});
+
+    let (status, session) =
+        call(&app, "POST", "/v1/auth/register", None, Some(creds.clone())).await;
+    assert_eq!(status, StatusCode::CREATED, "{session}");
+    let (status, _) = call(&app, "POST", "/v1/auth/register", None, Some(creds.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, res) = call(
+        &app,
+        "POST",
+        "/v1/auth/register",
+        None,
+        Some(json!({"username": "x y", "password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{res}");
+
+    // Usernames are case-insensitive.
+    let login = json!({"username": name.to_uppercase(), "password": "correct horse"});
+    let (status, again) = call(&app, "POST", "/v1/auth/login", None, Some(login)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(again["user_id"], session["user_id"]);
+
+    let (_, me) = call(
+        &app,
+        "GET",
+        "/v1/me",
+        session["access_token"].as_str(),
+        None,
+    )
+    .await;
+    assert_eq!(me["username"], name.to_lowercase());
+
+    // Wrong password and unknown user look the same.
+    let (status, wrong) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({"username": name, "password": "wrong horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, unknown) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({"username": "nobody-here", "password": "wrong horse"})),
+    )
+    .await;
+    assert_eq!(wrong, unknown);
+
+    // Changing the password signs out the other sessions.
+    let change = json!({"current_password": "correct horse", "new_password": "battery staple"});
+    let (status, changed) = call(
+        &app,
+        "POST",
+        "/v1/auth/password",
+        session["access_token"].as_str(),
+        Some(change),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": again["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(&app, "POST", "/v1/auth/login", None, Some(creds)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({"username": name, "password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn repeated_wrong_passwords_lock_the_username() {
+    let Some(app) = app().await else { return };
+    let name = format!("lock-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/register",
+        None,
+        Some(json!({"username": name, "password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    for _ in 0..10 {
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(json!({"username": name, "password": "wrong horse"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({"username": name, "password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+}

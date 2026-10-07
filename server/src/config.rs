@@ -9,8 +9,10 @@ pub struct Config {
     /// HMAC key for access tokens, at least 32 bytes.
     pub jwt_secret: Vec<u8>,
     /// Accepted `aud` values for Sign in with Apple ID tokens (bundle ids).
+    /// Empty (the default) turns Apple sign-in off.
     pub apple_audiences: Vec<String>,
     /// Accepted `aud` values for Google ID tokens (OAuth client ids).
+    /// Empty (the default) turns Google sign-in off.
     pub google_audiences: Vec<String>,
     /// Accept `provider: "dev"` sign-ins with any subject. Never in production.
     pub dev_auth: bool,
@@ -40,7 +42,7 @@ impl Config {
         Ok(Self {
             database_url,
             jwt_secret,
-            apple_audiences: list("MOTIF_APPLE_AUDIENCES", &["app.motif.Motif"]),
+            apple_audiences: list("MOTIF_APPLE_AUDIENCES", &[]),
             google_audiences: list("MOTIF_GOOGLE_CLIENT_IDS", &[]),
             dev_auth,
             db_max_connections: env::var("MOTIF_DB_MAX_CONNECTIONS")

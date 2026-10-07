@@ -7,6 +7,7 @@
 //! sees or stores a password.
 
 pub mod idp;
+pub mod password;
 pub mod tokens;
 
 use axum::extract::FromRequestParts;

@@ -163,6 +163,7 @@ pub async fn logout(
 #[derive(Serialize)]
 pub struct Me {
     user_id: Uuid,
+    username: Option<String>,
     identities: Vec<LinkedIdentity>,
 }
 
@@ -173,22 +174,29 @@ pub struct LinkedIdentity {
 }
 
 pub async fn me(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<Json<Me>> {
+    let user: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT p.username FROM users u LEFT JOIN password_credentials p ON p.user_id = u.id WHERE u.id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((username,)) = user else {
+        return Err(ApiError::NotFound);
+    };
     let identities = sqlx::query_as::<_, LinkedIdentity>(
         "SELECT provider, email FROM identities WHERE user_id = $1 ORDER BY created_at",
     )
     .bind(user_id)
     .fetch_all(&state.db)
     .await?;
-    if identities.is_empty() {
-        return Err(ApiError::NotFound);
-    }
     Ok(Json(Me {
         user_id,
+        username,
         identities,
     }))
 }
 
-async fn start_session(
+pub(super) async fn start_session(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     user_id: Uuid,
@@ -219,7 +227,7 @@ async fn start_session(
     })
 }
 
-async fn revoke_family(tx: &mut sqlx::PgConnection, family: Uuid) -> ApiResult<()> {
+pub(super) async fn revoke_family(tx: &mut sqlx::PgConnection, family: Uuid) -> ApiResult<()> {
     sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL",
     )
@@ -229,6 +237,6 @@ async fn revoke_family(tx: &mut sqlx::PgConnection, family: Uuid) -> ApiResult<(
     Ok(())
 }
 
-fn is_constraint(e: &sqlx::Error, name: &str) -> bool {
+pub(super) fn is_constraint(e: &sqlx::Error, name: &str) -> bool {
     e.as_database_error().and_then(|d| d.constraint()) == Some(name)
 }

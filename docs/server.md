@@ -1,14 +1,14 @@
 # Server and sync
 
-Status: first version scaffolded in `server/`. Covers what the server does, how it runs on Vercel, how the apps talk to it, and the decisions still open.
+Status: first version in `server/`. Covers what the server does, how it runs on Vercel, how the apps talk to it, and the decisions made so far.
 
 ## What the server is for
 
 Motif stays local-first. Playback, the library, analysis and DJ mixing run on the device and work with no network and no account. The server adds the things a single device cannot do on its own:
 
-- **Accounts**: sign in with Apple or Google, so a user's devices can find each other.
+- **Accounts**: a username and password, so a user's devices can find each other.
 - **The listening history log**: every device uploads its events and pulls the others', so each device ends up holding the full merged log (docs/analytics.md). Recaps are computed from that log.
-- **Library metadata, playlists and crates** (next): the same mechanism, see Open decisions.
+- **Library metadata, playlists and crates** (next): the same log, see Decisions.
 
 It does not store or stream audio. Files stay on each device. Syncing audio through user-owned storage such as S3 is a later step and does not change anything here.
 
@@ -39,13 +39,13 @@ Recommended: **Neon from the Vercel Marketplace**. Connecting it sets `DATABASE_
 - The API uses the pooled URL with a small per-instance pool (`MOTIF_DB_MAX_CONNECTIONS`, default 5). Many function instances then share Neon's pooler instead of each holding direct Postgres connections.
 - Migrations use the direct URL, because they hold a session-level advisory lock that a transaction-mode pooler does not keep.
 - If the pooler ever rejects prepared statements, `MOTIF_DB_STATEMENT_CACHE=0` turns off sqlx's statement cache without a code change.
-- Put the function region (`regions` in `vercel.json`) and the Neon region next to each other; every request does at least one round trip between them.
+- The function region (`regions` in `vercel.json`) and the Neon region sit next to each other, because every request does at least one round trip between them. Both are in Singapore: Neon has no India region, and Singapore is the closest to Chennai that both offer.
 
 Supabase and other Postgres hosts work the same way: anything with a pooled and a direct connection string.
 
 ### Deploying
 
-The project owner does this once (steps in `server/README.md`): import the repo in Vercel with Root Directory `server`, connect Neon, set `MOTIF_JWT_SECRET` and the sign-in audiences, and add the direct database URL as the `MOTIF_DATABASE_URL` GitHub secret. After that, merging to `main` deploys production and the **Server migrations** workflow applies new migrations.
+The project owner does this once (steps in `server/README.md`): import the repo in Vercel with Root Directory `server`, connect Neon, set `MOTIF_JWT_SECRET`, and add the direct database URL as the `MOTIF_DATABASE_URL` GitHub secret. After that, merging to `main` deploys production and the **Server migrations** workflow applies new migrations.
 
 Vercel deploys the new code while the workflow migrates, so for a short time old code runs on the new schema and possibly new code on the old one. Migrations therefore stay additive: add a column or table in one release, start using it, and remove the old one in a later release.
 
@@ -56,7 +56,10 @@ Full contract: `schemas/api/openapi.yaml`. All bodies are JSON; errors are `{"er
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | Liveness plus a database round trip; 503 when the database is down |
-| `POST /v1/auth/token` | Exchange an Apple or Google ID token for a Motif session; creates the account on first sign-in |
+| `POST /v1/auth/register` | Create an account with a username and password; returns a session |
+| `POST /v1/auth/login` | Sign in with a username and password |
+| `POST /v1/auth/password` | Change the password; signs out every other device |
+| `POST /v1/auth/token` | Exchange an Apple or Google ID token for a session; off unless configured |
 | `POST /v1/auth/refresh` | Rotate the refresh token |
 | `POST /v1/auth/logout` | Revoke this device's session |
 | `GET /v1/me` | The account and its linked sign-in methods |
@@ -65,11 +68,18 @@ Full contract: `schemas/api/openapi.yaml`. All bodies are JSON; errors are `{"er
 
 ### Accounts and tokens
 
-The apps sign in natively and send the provider's ID token. The server checks its signature against the provider's published keys (cached for an hour), its issuer, audience and expiry, then finds or creates the user by `(provider, subject)`. Motif never handles passwords.
+Accounts are a username and a password. Nothing costs money and nothing depends on Apple or Google.
+
+- **Usernames** are 3 to 32 characters of letters, digits, `.`, `_` and `-`, case-insensitive (stored lowercased).
+- **Passwords** are at least 8 characters, hashed with Argon2id (19 MiB, 2 passes, the OWASP baseline) on a blocking thread so hashing never stalls other requests. Only the hash is stored.
+- **Login** answers "invalid username or password" for both an unknown username and a wrong password, and spends the same hashing time on both, so it does not reveal which usernames exist. Ten wrong passwords in a row lock that username for 15 minutes.
+- **No email, so no reset.** A forgotten password cannot be recovered. Nothing is lost: the history stays on each device and uploads again to a new account. Changing the password (while signed in) signs out every other device.
+- **Apple and Google sign-in** are still in the server (`POST /v1/auth/token`, verifying ID tokens against the providers' published keys), switched off until `MOTIF_APPLE_AUDIENCES` or `MOTIF_GOOGLE_CLIENT_IDS` is set. They are free to use if wanted later. Linking them to an existing username account is not built yet; today each would create its own account.
+
+Every sign-in method ends in the same session:
 
 - **Access token**: an HS256 JWT signed with `MOTIF_JWT_SECRET`, valid 15 minutes, checked without a database lookup.
 - **Refresh token**: 256 random bits, stored only as a SHA-256 hash, valid 90 days, rotated on every use. Presenting a token that was already rotated signs out that whole sign-in (it was probably copied), except within 60 seconds of the rotation, which covers an app retrying after a dropped response.
-- Email is kept only when the provider marks it verified. Apple often gives a private relay address; nothing depends on email.
 - `provider: "dev"` accepts any subject, for local development and tests. It is off unless `MOTIF_DEV_AUTH=1`, and the server refuses to start with it on in a Vercel production deployment.
 
 ### History sync
@@ -84,11 +94,11 @@ This implements the sync section of docs/analytics.md.
 
 Recommended: **a native client on each platform, written against the OpenAPI contract**, not a shared Rust client.
 
-The API is seven small JSON endpoints. The hard parts of the client are platform parts: background scheduling, secure token storage, native sign-in and system networking. A Rust client would still need all of those from each platform, and would add a second HTTP and TLS stack next to URLSession and OkHttp.
+The API is ten small JSON endpoints. The hard parts of the client are platform parts: background scheduling, secure token storage, native sign-in and system networking. A Rust client would still need all of those from each platform, and would add a second HTTP and TLS stack next to URLSession and OkHttp.
 
 | | Apple (MotifKit) | Android |
 | --- | --- | --- |
-| Sign-in | `ASAuthorizationAppleIDProvider` gives `identityToken`; Google Sign-In optional | Credential Manager with `GetGoogleIdOption` (server client id) gives a Google ID token |
+| Sign-in | Username and password form; offer to save it with Password AutoFill | Username and password form; Credential Manager saves the password |
 | Tokens | Keychain, `kSecAttrAccessibleAfterFirstUnlock` so background sync can read them | DataStore encrypted with an Android Keystore key |
 | HTTP | `URLSession` + `Codable` | OkHttp or Ktor + kotlinx.serialization |
 | Background upload | `BGAppRefreshTask`, plus on launch and network change | WorkManager with a network constraint |
@@ -98,13 +108,21 @@ What stays shared is the contract and the data: `schemas/api/openapi.yaml`, the 
 
 The sync loop on each device: upload unsynced rows in batches of up to 1,000 and mark acknowledged ones synced; then pull from the stored cursor until `has_more` is false, inserting pulled events into `history.db` (duplicates ignored); save the cursor. On a 401, refresh once and retry; if the refresh fails, keep everything local and show "signed out" in Settings.
 
-## Open decisions for Pan
+## Decisions (Pan, 2026-10-07)
 
-1. **Sign-in methods.** Recommended: Sign in with Apple on Apple platforms and Google on Android, both already supported by the server. App Store rules require Sign in with Apple whenever another social login is offered on iOS, so Google on iOS is optional extra work. The alternative is a hosted auth service (Clerk, Supabase Auth, Neon Auth), which adds a dependency and per-user pricing for little gain here.
-2. **API client.** Recommended: native per platform against the OpenAPI contract, as above. Alternative: a `core/sync` Rust crate exposed through UniFFI, sharing the sync loop at the cost of a second networking stack in each app.
-3. **Region.** Pick one region for the function and Neon together, near where you and your users are. `vercel.json` has no `regions` yet, so Vercel's default applies until this is set.
-4. **Preview databases.** Recommended: let the Neon integration create a database branch per preview deployment, so PR previews never write to production data. Alternative: previews share the production database.
-5. **Library, playlist and crate sync.** Recommended: express them as events in the same log (`track_updated`, `crate_changed` and similar are already defined in docs/analytics.md), and have each device rebuild its playlists and crates from the merged log, with the latest event winning per field. One sync mechanism, already idempotent and offline-safe. Alternative: separate state endpoints per object with version numbers, which is more code and needs conflict handling of its own.
+1. **Sign-in is a username and password.** No paid or third-party auth service. Apple and Google stay available in the server, switched off.
+2. **Native clients.** Each app talks to the API with its own small client against `schemas/api/openapi.yaml`.
+3. **Everything syncs through the history log.** Library edits, playlists and crates become events in the same log (`track_updated`, `crate_changed` and the like in docs/analytics.md). Each device rebuilds playlists and crates from the merged log, with the latest event winning per field. The server needs no new endpoints for them.
+4. **Preview databases are optional and free at this size.** See Cost.
+5. **Region: Singapore** for both the function (`sin1`) and Neon (`aws-ap-southeast-1`).
+
+## Cost
+
+Everything fits in free plans for a personal project:
+
+- **Vercel Hobby** is free for non-commercial use and runs the Rust function. A commercial launch would need Pro.
+- **Neon Free** includes 10 branches, 100 compute-hours a month and 0.5 GB of storage per project. Databases scale to zero after 5 idle minutes, so an idle branch uses no compute. A heavy listener produces about 10 MB of history a year (docs/analytics.md), so 0.5 GB lasts a long time for a few users.
+- **Preview branches** (one database branch per PR preview) count toward the 10 branches and share the compute-hours. With the integration set to delete a branch when its preview goes away, a few open PRs at a time stays free. Branches beyond 10 cost $1.50 a month each on paid plans. Turning previews off entirely also works; previews then share the production database.
 
 ## Not built yet
 
