@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark from the first frame: no white flash before Compose draws. -->
+    <style name="Theme.Motif" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ground</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

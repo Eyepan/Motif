@@ -1,0 +1,21 @@
+[package]
+name = "motif-dsp-jni"
+version = "0.1.0"
+edition = "2021"
+description = "JNI bindings from Motif's Android app to the shared DSP core"
+license = "UNLICENSED"
+publish = false
+
+[lib]
+name = "motif_dsp_jni"
+crate-type = ["cdylib"]
+
+[dependencies]
+motif-dsp = { path = "../../../core/dsp" }
+jni = { version = "0.21", default-features = false }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

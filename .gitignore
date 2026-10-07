@@ -13,3 +13,5 @@ target/
 .gradle/
 local.properties
 build/
+apps/android/app/src/main/jniLibs/
+.kotlin/
