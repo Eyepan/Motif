@@ -125,10 +125,17 @@ class LibraryFlowTest {
     }
 
     private fun awaitImports(count: Int) {
-        compose.waitUntil(120_000) {
+        // Poll the importer directly rather than with compose.waitUntil: that forces a layout pass
+        // on every check while the Add Music sheet redraws progress, and once tripped Compose's
+        // "performMeasureAndLayout called during measure layout" check on CI.
+        val deadline = System.currentTimeMillis() + 120_000
+        while (true) {
             val jobs = app.importer.jobs.value
-            jobs.size == count && jobs.none { it.stage is ImportJob.Stage.Copying || it.stage is ImportJob.Stage.Analyzing }
+            if (jobs.size == count && jobs.none { it.stage is ImportJob.Stage.Copying || it.stage is ImportJob.Stage.Analyzing }) break
+            check(System.currentTimeMillis() < deadline) { "Imports didn't finish: ${jobs.map { "${it.fileName}: ${it.stage}" }}" }
+            Thread.sleep(250)
         }
+        compose.waitForIdle()
         val failed = app.importer.jobs.value.mapNotNull { j -> (j.stage as? ImportJob.Stage.Failed)?.let { "${j.fileName}: ${it.message}" } }
         assertTrue("Failed imports: $failed", failed.isEmpty())
         compose.waitUntil(5_000) { app.library.tracks.value.size == count }
