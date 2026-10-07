@@ -1,45 +1,19 @@
--- Motif library schema, shared by every platform. Bump user_version on change,
--- add schemas/migrations/<version>.sql, and run it from each app's store.
--- Metadata design: docs/metadata.md.
-PRAGMA user_version = 3;
+-- v2 -> v3: release details, MusicBrainz ids, more analysis, raw tags, user
+-- overrides, artist credits and genres. See docs/metadata.md.
 
--- Display values, already resolved by precedence: user override > file tag >
--- MusicBrainz > inferred. Raw inputs live in track_tags and track_overrides.
-CREATE TABLE IF NOT EXISTS tracks (
-    id              TEXT PRIMARY KEY,          -- UUID
-    title           TEXT NOT NULL,
-    artist          TEXT,                      -- credit string as tagged, e.g. 'A feat. B'; see track_artists
-    album           TEXT,
-    duration_ms     INTEGER NOT NULL DEFAULT 0,
-    file_path       TEXT NOT NULL UNIQUE,      -- relative to the app's media directory
-    format          TEXT NOT NULL,             -- flac | wav | alac | aiff | mp3 | ...
-    sample_rate     INTEGER,
-    bit_depth       INTEGER,
-    channels        INTEGER,
-    source          TEXT NOT NULL,             -- local | internet_archive | jamendo | bandcamp
-    source_ref      TEXT,                      -- id in the source catalog
-    license_url     TEXT,
-    bpm             REAL,                      -- filled by core/dsp analysis
-    loudness_db     REAL,
-    musical_key     TEXT,                      -- Camelot notation, e.g. 8A (added in v2)
-    waveform        BLOB,                      -- 128 loudness bytes, 0-255 (added in v2)
-    added_at        INTEGER NOT NULL,          -- unix seconds
-    album_artist    TEXT,                      -- added in v3 from here down
-    track_no        INTEGER,
-    disc_no         INTEGER,
-    release_date    TEXT,                      -- ISO 8601, may be just YYYY or YYYY-MM
-    isrc            TEXT,
-    mb_recording_id TEXT,                      -- MusicBrainz, the only external catalog
-    mb_release_id   TEXT,
-    energy          REAL,                      -- 0..1, core/dsp
-    beat_offset_ms  INTEGER,                   -- first downbeat, core/dsp
-    analyzer_version INTEGER,                  -- core/dsp version that produced bpm, key, energy
-    content_hash    TEXT,                      -- SHA-256 of the file, used by the history log's track_key
-    artwork_hash    TEXT                       -- SHA-256 of the image in Media/artwork/<hash>
-);
+ALTER TABLE tracks ADD COLUMN album_artist TEXT;
+ALTER TABLE tracks ADD COLUMN track_no INTEGER;
+ALTER TABLE tracks ADD COLUMN disc_no INTEGER;
+ALTER TABLE tracks ADD COLUMN release_date TEXT;
+ALTER TABLE tracks ADD COLUMN isrc TEXT;
+ALTER TABLE tracks ADD COLUMN mb_recording_id TEXT;
+ALTER TABLE tracks ADD COLUMN mb_release_id TEXT;
+ALTER TABLE tracks ADD COLUMN energy REAL;
+ALTER TABLE tracks ADD COLUMN beat_offset_ms INTEGER;
+ALTER TABLE tracks ADD COLUMN analyzer_version INTEGER;
+ALTER TABLE tracks ADD COLUMN content_hash TEXT;
+ALTER TABLE tracks ADD COLUMN artwork_hash TEXT;
 
-CREATE INDEX IF NOT EXISTS tracks_artist_album ON tracks(artist, album);
-CREATE INDEX IF NOT EXISTS tracks_added_at ON tracks(added_at DESC);
 CREATE INDEX IF NOT EXISTS tracks_album_artist ON tracks(album_artist, album, disc_no, track_no);
 CREATE INDEX IF NOT EXISTS tracks_mb_recording ON tracks(mb_recording_id);
 CREATE INDEX IF NOT EXISTS tracks_content_hash ON tracks(content_hash);

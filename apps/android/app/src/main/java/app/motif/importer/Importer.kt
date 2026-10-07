@@ -9,6 +9,8 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import app.motif.data.LibraryStore
+import app.motif.data.RawTags
+import app.motif.data.TagCleaner
 import app.motif.data.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -118,9 +120,10 @@ class Importer(
         val dest = File(store.mediaDir, if (ext.isEmpty()) id else "$id.$ext")
         try {
             fill(dest)
-            var track = readTrack(id, dest, job.fileName, info)
+            val (read, raw) = readTrack(id, dest, job.fileName, info)
+            var track = read
             if (cover != null) runCatching { CatalogArt.save(cover, CatalogArt.fileFor(context.filesDir, id)) }
-            store.insert(track)
+            store.insert(track, raw)
 
             if (analyzeOnImport()) {
                 setStage(job.id, ImportJob.Stage.Analyzing(0f))
@@ -140,7 +143,8 @@ class Importer(
         }
     }
 
-    private fun readTrack(id: String, file: File, fileName: String, info: SourceInfo?): Track {
+    /** The track with cleaned tags (the catalog's where the file has none), and the tags as read. */
+    private fun readTrack(id: String, file: File, fileName: String, info: SourceInfo?): Pair<Track, RawTags> {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
@@ -173,11 +177,20 @@ class Importer(
                     extractor.release()
                 }
             }
+            val raw = RawTags(
+                title = meta(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                artist = meta(MediaMetadataRetriever.METADATA_KEY_ARTIST),
+                album = meta(MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                albumArtist = meta(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST),
+            )
+            val suffixes = store.siteSuffixes + listOfNotNull(TagCleaner.siteSuffix(raw))
+            val albumArtist = TagCleaner.clean(raw.albumArtist, suffixes)
             return Track(
                 id = id,
-                title = meta(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: info?.title ?: fileName.substringBeforeLast('.'),
-                artist = meta(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: meta(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST) ?: info?.artist,
-                album = meta(MediaMetadataRetriever.METADATA_KEY_ALBUM) ?: info?.album,
+                title = TagCleaner.clean(raw.title, suffixes) ?: info?.title ?: fileName.substringBeforeLast('.'),
+                artist = TagCleaner.clean(raw.artist, suffixes) ?: albumArtist ?: info?.artist,
+                album = TagCleaner.clean(raw.album, suffixes) ?: info?.album,
+                albumArtist = albumArtist,
                 durationMs = durationMs,
                 filePath = file.name,
                 format = formatName(fileName.substringAfterLast('.', "").lowercase(), codecMime ?: mime),
@@ -188,7 +201,7 @@ class Importer(
                 sourceRef = info?.sourceRef,
                 licenseUrl = info?.licenseUrl,
                 addedAt = System.currentTimeMillis() / 1000,
-            )
+            ) to raw
         } finally {
             retriever.release()
         }
