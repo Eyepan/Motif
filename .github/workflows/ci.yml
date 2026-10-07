@@ -5,7 +5,44 @@ on:
   pull_request:
 
 jobs:
+  # Each job below runs only when something it builds changed. Skipped jobs count as passing,
+  # so they don't hold up merges.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      schemas: ${{ steps.filter.outputs.schemas }}
+      dsp: ${{ steps.filter.outputs.dsp }}
+      server: ${{ steps.filter.outputs.server }}
+      apple: ${{ steps.filter.outputs.apple }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            schemas:
+              - 'schemas/**'
+              - 'tools/**'
+              - '.github/workflows/ci.yml'
+            dsp:
+              - 'core/**'
+              - '.github/workflows/ci.yml'
+            server:
+              - 'server/**'
+              - 'schemas/api/**'
+              - '.github/workflows/ci.yml'
+            apple:
+              - 'apps/apple/**'
+              - 'core/**'
+              - 'schemas/**'
+              - '.github/workflows/ci.yml'
+
   schemas:
+    needs: changes
+    if: needs.changes.outputs.schemas == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,6 +52,8 @@ jobs:
       - run: python3 tools/check_genres.py
 
   dsp:
+    needs: changes
+    if: needs.changes.outputs.dsp == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -25,6 +64,8 @@ jobs:
       - run: cargo test
 
   server:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -58,6 +99,8 @@ jobs:
           cargo +1.92 build --release --locked --bin motif
 
   apple:
+    needs: changes
+    if: needs.changes.outputs.apple == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
