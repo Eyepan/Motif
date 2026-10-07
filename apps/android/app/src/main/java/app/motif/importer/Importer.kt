@@ -82,6 +82,24 @@ class Importer(
         _jobs.update { list -> list.filter { it.stage is ImportJob.Stage.Copying || it.stage is ImportJob.Stage.Analyzing } }
     }
 
+    /**
+     * Re-analyses tracks analysed before beat grids existed, one at a time
+     * behind any imports, then calls [onDone].
+     */
+    fun backfillBeatGrids(tracks: List<Track>, onDone: () -> Unit) {
+        val todo = tracks.filter { it.bpm != null && it.firstDownbeat == null }
+        scope.launch(Dispatchers.IO) {
+            for (track in todo) {
+                queue.withLock {
+                    val file = store.fileFor(track)
+                    val r = if (file.exists()) runCatching { TrackAnalyzer.analyze(file) {} }.getOrNull() else null
+                    if (r != null) store.updateAnalysis(track.id, r.bpm, r.loudnessDb, r.camelotKey, r.waveform, r.firstDownbeat)
+                }
+            }
+            launch(Dispatchers.Main) { onDone() }
+        }
+    }
+
     private fun setStage(id: String, stage: ImportJob.Stage) {
         _jobs.update { list -> list.map { if (it.id == id) ImportJob(it.id, it.fileName, stage) else it } }
     }
@@ -145,8 +163,11 @@ class Importer(
                 setStage(job.id, ImportJob.Stage.Analyzing(0f))
                 val result = runCatching { TrackAnalyzer.analyze(dest) { setStage(job.id, ImportJob.Stage.Analyzing(it)) } }.getOrNull()
                 if (result != null) {
-                    store.updateAnalysis(id, result.bpm, result.loudnessDb, result.camelotKey, result.waveform)
-                    track = track.copy(bpm = result.bpm, loudnessDb = result.loudnessDb, musicalKey = result.camelotKey, waveform = result.waveform)
+                    store.updateAnalysis(id, result.bpm, result.loudnessDb, result.camelotKey, result.waveform, result.firstDownbeat)
+                    track = track.copy(
+                        bpm = result.bpm, loudnessDb = result.loudnessDb, musicalKey = result.camelotKey,
+                        waveform = result.waveform, firstDownbeat = result.firstDownbeat,
+                    )
                 }
             }
             setStage(job.id, ImportJob.Stage.Done(track))

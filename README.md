@@ -9,7 +9,7 @@ apps/
   apple/      SwiftUI app for iOS + macOS (one multiplatform target) and MotifKit, its Swift package
   android/    Kotlin / Jetpack Compose app (not started)
 core/
-  dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo estimation, crossfade curves
+  dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo, key, beat grids, crossfades, beat-aligned blend planning, deck sync, tag cleanup
 server/       Sync service in Rust (axum + Postgres) for accounts and listening history; deploys to Vercel
 schemas/      Shared library schema (SQLite) and its migrations, the track JSON schema, the genre list, the sync API contract
 tools/        Schema checks and the MusicBrainz genre sync

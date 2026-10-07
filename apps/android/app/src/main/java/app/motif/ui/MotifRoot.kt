@@ -78,22 +78,18 @@ fun MotifRoot(app: MotifApp) {
             Tab.Library -> LibraryScreen(
                 tracks = tracks,
                 current = player.current,
-                onPlay = { list, index -> app.playback.play(list, index) },
+                onPlay = app::play,
                 onDelete = app::delete,
                 onImport = { showImport = true },
                 onOpenMix = { tab = Tab.Mix },
                 modifier = modifier,
             )
             Tab.Crates -> ComingSoon("No crates yet", "Crates for building sets are coming soon.", modifier)
-            Tab.Mix -> ComingSoon(
-                "DJ Mix is on its way",
-                "Two decks, sync and a crossfader are next. Until then, turn on Mix into next in Now Playing for automatic beatmatched blends.",
-                modifier,
-            )
+            Tab.Mix -> DjScreen(app.dj, tracks, modifier)
             Tab.Search -> SearchScreen(
                 tracks = tracks,
                 current = player.current,
-                onPlay = { list, index -> app.playback.play(list, index) },
+                onPlay = app::play,
                 modifier = modifier,
             )
             Tab.Discover -> DiscoverScreen(app, modifier)

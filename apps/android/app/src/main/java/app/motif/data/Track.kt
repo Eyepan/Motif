@@ -22,6 +22,8 @@ data class Track(
     val loudnessDb: Double? = null,
     /** Camelot notation, e.g. "8A". */
     val musicalKey: String? = null,
+    /** Seconds to the first downbeat of the beat grid; beats follow every 60 / [bpm] s. */
+    val firstDownbeat: Double? = null,
     /** Loudness overview for drawing, [LibraryStore.WAVEFORM_LENGTH] bytes. Local cache, not synced. */
     val waveform: ByteArray? = null,
     /** Unix seconds. */
@@ -39,6 +41,9 @@ data class Track(
     val monogram: String get() = title.firstOrNull()?.uppercase() ?: "♪"
 
     val bpmText: String get() = bpm?.let { "${Math.round(it)} BPM" } ?: "— BPM"
+
+    /** Whether the track has a beat grid, so it can be mixed beat on beat. */
+    val hasBeatGrid: Boolean get() = bpm != null && firstDownbeat != null
 
     /** "FLAC · 24-bit / 96 kHz" */
     val qualityLabel: String
@@ -80,6 +85,7 @@ data class Track(
             album == other.album && albumArtist == other.albumArtist && durationMs == other.durationMs && filePath == other.filePath &&
             format == other.format && sampleRate == other.sampleRate && bitDepth == other.bitDepth &&
             bpm == other.bpm && musicalKey == other.musicalKey && loudnessDb == other.loudnessDb &&
+            firstDownbeat == other.firstDownbeat &&
             waveform.contentEquals(other.waveform)
 
     override fun hashCode(): Int = id.hashCode()

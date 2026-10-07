@@ -9,6 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -125,13 +127,21 @@ class LibraryStore(private val context: Context) {
         prefs.edit().putInt(PREF_CLEANER_VERSION, version).apply()
     }
 
-    suspend fun updateAnalysis(id: String, bpm: Double?, loudnessDb: Double?, key: String?, waveform: ByteArray?) =
+    suspend fun updateAnalysis(
+        id: String,
+        bpm: Double?,
+        loudnessDb: Double?,
+        key: String?,
+        waveform: ByteArray?,
+        firstDownbeat: Double?,
+    ) =
         withContext(Dispatchers.IO) {
             val values = ContentValues().apply {
                 put("bpm", bpm)
                 put("loudness_db", loudnessDb)
                 put("musical_key", key)
                 put("waveform", waveform)
+                put("beat_offset_ms", firstDownbeat?.let { Math.round(it * 1000) })
             }
             helper.writableDatabase.update("tracks", values, "id = ?", arrayOf(id))
             refresh()
@@ -143,12 +153,18 @@ class LibraryStore(private val context: Context) {
         refresh()
     }
 
-    private fun refresh() {
-        helper.readableDatabase.rawQuery("SELECT * FROM tracks ORDER BY added_at DESC, title", null).use { c ->
-            val list = ArrayList<Track>(c.count)
-            while (c.moveToNext()) list += c.toTrack()
-            _tracks.value = list
+    private val refreshLock = Mutex()
+
+    /**
+     * Re-reads the table and publishes it on the main thread, where the UI
+     * collects it. One refresh at a time, so an older read can't publish after
+     * a newer one.
+     */
+    private suspend fun refresh() = refreshLock.withLock {
+        val list = helper.readableDatabase.rawQuery("SELECT * FROM tracks ORDER BY added_at DESC, title", null).use { c ->
+            ArrayList<Track>(c.count).also { list -> while (c.moveToNext()) list += c.toTrack() }
         }
+        withContext(Dispatchers.Main.immediate) { _tracks.value = list }
     }
 
     /** Statements from a schemas/ asset; the PRAGMA is handled by SQLiteOpenHelper's version. */
@@ -188,6 +204,7 @@ private fun Track.toValues() = ContentValues().apply {
     put("loudness_db", loudnessDb)
     put("musical_key", musicalKey)
     put("waveform", waveform)
+    put("beat_offset_ms", firstDownbeat?.let { Math.round(it * 1000) })
     put("added_at", addedAt)
     put("album_artist", albumArtist)
 }
@@ -214,6 +231,7 @@ private fun Cursor.toTrack() = Track(
     loudnessDb = double("loudness_db"),
     musicalKey = str("musical_key"),
     waveform = getColumnIndexOrThrow("waveform").let { if (isNull(it)) null else getBlob(it) },
+    firstDownbeat = double("beat_offset_ms")?.let { it / 1000 },
     addedAt = getLong(getColumnIndexOrThrow("added_at")),
     albumArtist = str("album_artist"),
 )

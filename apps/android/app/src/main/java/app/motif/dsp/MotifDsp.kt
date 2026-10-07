@@ -8,8 +8,9 @@ import kotlin.math.sin
 /**
  * Bridge to the shared Rust DSP core (core/dsp) through apps/android/dsp-jni.
  * If the native library isn't packaged (a local build that skipped
- * scripts/build-dsp.sh), [available] is false: import skips analysis and
- * crossfades fall back to the same equal-power curve in Kotlin.
+ * scripts/build-dsp.sh), [available] is false: import skips analysis,
+ * crossfades fall back to the same equal-power curve in Kotlin, and blends
+ * aren't beat aligned.
  */
 object MotifDsp {
     val available: Boolean = try {
@@ -31,12 +32,28 @@ object MotifDsp {
 
     @JvmStatic external fun analyzerNew(sampleRate: Int, channels: Int): Long
     @JvmStatic external fun analyzerPush(handle: Long, samples: FloatArray, count: Int)
-    /** [peak dB, RMS dB, BPM, Camelot number (0 = none), minor (1/0)]. */
+    /** [peak dB, RMS dB, BPM, Camelot number (0 = none), minor (1/0), first downbeat s (-1 = none)]. */
     @JvmStatic external fun analyzerFinish(handle: Long): FloatArray?
     @JvmStatic external fun analyzerOverview(handle: Long, count: Int): FloatArray?
     @JvmStatic external fun analyzerFree(handle: Long)
     @JvmStatic private external fun crossfadeGains(t: Float, curve: Int): FloatArray?
 
+    // Mixing (core/dsp/src/mix.rs). Seconds throughout; a downbeat of -1 means no beat grid.
+
+    /** [out start, in start, length, rate, lock]. */
+    @JvmStatic external fun mixPlan(
+        outBpm: Double, outDownbeat: Double, outDuration: Double,
+        inBpm: Double, inDownbeat: Double, inDuration: Double,
+    ): DoubleArray?
+
+    /** [progress, outgoing gain, incoming gain, action (0 = set speed, 1 = seek), value]. */
+    @JvmStatic external fun mixFollow(plan: DoubleArray, outPos: Double, inPos: Double): DoubleArray?
+
+    /** [speed, position] for the slave deck, or null when the decks can't sync. */
+    @JvmStatic external fun deckSync(
+        masterBpm: Double, masterDownbeat: Double, masterPos: Double, masterSpeed: Double,
+        slaveBpm: Double, slaveDownbeat: Double, slavePos: Double, snap: Boolean,
+    ): DoubleArray?
     // Tag cleanup and artist credits (core/dsp/src/meta.rs). Use through data.TagCleaner.
     @JvmStatic external fun metaCleanerVersion(): Int
     @JvmStatic external fun metaNorm(text: String): String

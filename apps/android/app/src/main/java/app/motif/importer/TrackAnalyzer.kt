@@ -13,11 +13,18 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
 /** Result of on-device analysis, in the library's units. */
-class AnalysisResult(val bpm: Double?, val loudnessDb: Double?, val camelotKey: String?, val waveform: ByteArray)
+class AnalysisResult(
+    val bpm: Double?,
+    val loudnessDb: Double?,
+    val camelotKey: String?,
+    val waveform: ByteArray,
+    /** Seconds to the first downbeat, when a beat grid was found. */
+    val firstDownbeat: Double?,
+)
 
 /**
  * Decodes a file with the platform codecs and streams PCM through the DSP
- * core's analyzer: tempo, Camelot key, loudness and a waveform overview.
+ * core's analyzer: tempo, beat grid, Camelot key, loudness and a waveform overview.
  * Memory stays flat: one decoder buffer at a time.
  */
 object TrackAnalyzer {
@@ -128,7 +135,8 @@ object TrackAnalyzer {
                 bpm = r[2].takeIf { it > 0 }?.toDouble(),
                 loudnessDb = r[1].takeIf { it.isFinite() }?.toDouble(),
                 camelotKey = if (camelot in 1..12) "$camelot${if (r[4] > 0f) "A" else "B"}" else null,
-                waveform = ByteArray(overview.size) { (overview[it] * 255).roundToInt().coerceIn(0, 255).toByte() },
+                waveform = ByteArray(overview.size) { overview[it].takeIf { v -> v.isFinite() }?.let { v -> (v * 255).roundToInt().coerceIn(0, 255) }?.toByte() ?: 0 },
+                firstDownbeat = r.getOrNull(5)?.takeIf { it >= 0f && r[2] > 0f }?.toDouble(),
             )
         } finally {
             if (handle != 0L) MotifDsp.analyzerFree(handle)
