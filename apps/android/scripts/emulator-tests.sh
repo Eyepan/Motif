@@ -14,4 +14,8 @@ status=$?
 
 adb exec-out run-as app.motif tar -cf - -C files screenshots | tar -xf - -C "$OUT" || echo "No screenshots found"
 adb logcat -d > "$OUT/logcat.txt" || true
+if [[ $status -ne 0 ]]; then
+  # Print each failure's full stack trace into the CI log.
+  find app/build/outputs/androidTest-results -name '*.xml' -exec sed -n '/<failure/,/<\/failure>/p' {} +
+fi
 exit $status
