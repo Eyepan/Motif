@@ -9,7 +9,30 @@ permissions:
   contents: write  # updates the android-latest prerelease on main
 
 jobs:
+  # The app builds only when Android code, the DSP core or the shared schemas changed.
+  # Skipped jobs count as passing, so they don't hold up merges.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            android:
+              - 'apps/android/**'
+              - 'core/**'
+              - 'schemas/**'
+              - '.github/workflows/android.yml'
+
   apk:
+    needs: changes
+    if: needs.changes.outputs.android == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -58,6 +81,8 @@ jobs:
 
   emulator:
     name: Emulator tests
+    needs: changes
+    if: needs.changes.outputs.android == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
