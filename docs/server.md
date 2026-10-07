@@ -28,7 +28,7 @@ The same axum router is built into two binaries: `api/motif.rs` (the Vercel Func
 
 - **One function for the whole API.** `vercel.json` rewrites every path to `api/motif`, and axum routes inside it. One function means one cold start and one connection pool instead of one per endpoint. If the platform hands the function the rewritten path instead of the original, a small layer strips the `/api/motif` prefix, so both work; the first preview deploy will show which one Vercel does.
 - **Fluid compute.** The Rust runtime runs the binary as a long-lived HTTP server that handles many requests concurrently per instance. The database pool and the cached Apple and Google signing keys are shared across those requests.
-- **Limits that shape the API.** Request bodies are capped at 4.5 MB, so uploads are limited to 1,000 events and 4 MB per batch. `maxDuration` is set to 30 s; nothing should come close. There are no long-lived connections, so sync is pull-based (on launch, on foreground, after an upload), not a live socket.
+- **Limits that shape the API.** Request bodies are capped at 4.5 MB, so uploads are limited to 1,000 events and 4 MB per batch. Function duration stays at the platform default; no request should come close. (Vercel rejects a `functions` entry for a `.rs` file, so per-function settings are not available for the Rust runtime.) There are no long-lived connections, so sync is pull-based (on launch, on foreground, after an upload), not a live socket.
 - **Cold starts.** The pool connects lazily, so a cold instance answers `/health` and token checks without waiting on the database.
 - **Build.** Vercel builds the release binary on each deploy (thin LTO). CI builds the same binary on every PR so a broken build never reaches Vercel.
 
