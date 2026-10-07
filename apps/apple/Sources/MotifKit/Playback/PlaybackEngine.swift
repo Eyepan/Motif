@@ -154,7 +154,8 @@ public final class PlaybackEngine {
         guard remaining > 0 else { return }
         player.scheduleSegment(file, startingFrame: frame, frameCount: remaining, at: nil,
                                completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            Task { @MainActor in self?.segmentFinished(token) }
+            let engine = self
+            Task { @MainActor in engine?.segmentFinished(token) }
         }
     }
 

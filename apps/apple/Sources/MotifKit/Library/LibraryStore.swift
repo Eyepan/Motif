@@ -28,7 +28,8 @@ public actor LibraryStore {
 
     /// Where imported audio files live. Track.filePath is relative to this.
     public nonisolated let mediaDirectory: URL
-    private let db: OpaquePointer
+    /// Only touched from actor-isolated code and from deinit, which has exclusive access.
+    private nonisolated(unsafe) let db: OpaquePointer
 
     /// The default store in Application Support. Excluded from nothing: audio
     /// and the database are user content and belong in backups.

@@ -91,7 +91,11 @@ public struct InternetArchiveSource: MusicSource {
 
         init(from decoder: Decoder) throws {
             let c = try decoder.singleValueContainer()
-            values = (try? c.decode([String].self)) ?? [try c.decode(String.self)]
+            if let many = try? c.decode([String].self) {
+                values = many
+            } else {
+                values = [try c.decode(String.self)]
+            }
         }
     }
 }
