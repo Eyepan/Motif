@@ -19,6 +19,7 @@
     "sourceRef": { "type": ["string", "null"] },
     "licenseUrl": { "type": ["string", "null"], "format": "uri" },
     "bpm": { "type": ["number", "null"] },
+    "firstDownbeat": { "type": ["number", "null"], "minimum": 0, "description": "Seconds to the first downbeat of the beat grid; beats follow every 60/bpm seconds" },
     "loudnessDb": { "type": ["number", "null"] },
     "musicalKey": { "type": ["string", "null"], "pattern": "^(1[0-2]|[1-9])[AB]$", "description": "Camelot notation" },
     "addedAt": { "type": "integer", "description": "Unix seconds" }

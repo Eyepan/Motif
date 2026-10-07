@@ -1,12 +1,16 @@
 //! Streaming track analysis: peak, RMS loudness, tempo and key.
 //!
 //! Audio is pushed in chunks, so a whole track never has to sit in memory.
-//! Only a per-hop energy envelope is retained (one f32 per `HOP` frames,
-//! roughly 350 KB for an hour of 44.1 kHz audio).
+//! Only a per-hop energy envelope is retained (one f32 per `FINE_HOP` frames,
+//! roughly 1.4 MB for an hour of 44.1 kHz audio).
 
-/// Frames per onset-envelope hop.
+/// Frames per hop of the tempo and overview envelope.
 pub const HOP: usize = 512;
+/// Frames per hop of the envelope the beat grid is fitted to (about 3 ms).
+pub const FINE_HOP: usize = 128;
+const FINE_PER_HOP: usize = HOP / FINE_HOP;
 
+use crate::beatgrid;
 use crate::key::{Key, KeyDetector};
 
 const MIN_BPM: f32 = 70.0;
@@ -18,8 +22,12 @@ pub struct Analysis {
     pub peak_db: f32,
     /// RMS level in dBFS across all channels (`-inf` for silence).
     pub rms_db: f32,
-    /// Estimated tempo, or 0 when no stable beat was found.
+    /// Estimated tempo, or 0 when no stable beat was found. Refined by the
+    /// beat grid fit when one was found.
     pub bpm: f32,
+    /// Seconds from the start of the track to the first downbeat of the beat
+    /// grid; beats follow every `60 / bpm` seconds. `None` without a grid.
+    pub first_downbeat: Option<f32>,
     pub key: Option<Key>,
 }
 
@@ -65,7 +73,7 @@ impl Analyzer {
             self.key.push(mono);
             self.hop_energy += (mono as f64) * (mono as f64);
             self.hop_fill += 1;
-            if self.hop_fill == HOP {
+            if self.hop_fill == FINE_HOP {
                 self.envelope.push(self.hop_energy as f32);
                 self.hop_energy = 0.0;
                 self.hop_fill = 0;
@@ -79,12 +87,21 @@ impl Analyzer {
         } else {
             (self.sum_squares / self.samples_seen as f64).sqrt() as f32
         };
+        let coarse = self.coarse_envelope();
+        let estimate = estimate_bpm(&coarse, self.sample_rate as f32 / HOP as f32);
+        let grid = beatgrid::fit(&self.envelope, self.sample_rate as f64 / FINE_HOP as f64, estimate as f64);
         Analysis {
             peak_db: to_db(self.peak),
             rms_db: to_db(rms),
-            bpm: estimate_bpm(&self.envelope, self.sample_rate as f32 / HOP as f32),
+            bpm: grid.map_or(estimate, |g| g.bpm as f32),
+            first_downbeat: grid.map(|g| g.first_downbeat as f32),
             key: self.key.finish(),
         }
+    }
+
+    /// Energy per `HOP` frames, summed from the fine envelope.
+    fn coarse_envelope(&self) -> Vec<f32> {
+        self.envelope.chunks_exact(FINE_PER_HOP).map(|c| c.iter().sum()).collect()
     }
 }
 
@@ -92,17 +109,18 @@ impl Analyzer {
     /// Loudness overview for drawing a waveform: `buckets` values in 0...1,
     /// each the RMS of its slice of the track, normalised to the loudest slice.
     pub fn overview(&self, buckets: usize) -> Vec<f32> {
-        if buckets == 0 || self.envelope.is_empty() {
+        let envelope = self.coarse_envelope();
+        if buckets == 0 || envelope.is_empty() {
             return vec![0.0; buckets];
         }
-        let n = self.envelope.len();
+        let n = envelope.len();
         let mut out: Vec<f32> = (0..buckets)
             .map(|b| {
                 let (start, end) = (b * n / buckets, ((b + 1) * n / buckets).max(b * n / buckets + 1).min(n));
                 if start >= n {
                     return 0.0;
                 }
-                let energy: f32 = self.envelope[start..end].iter().sum();
+                let energy: f32 = envelope[start..end].iter().sum();
                 (energy / ((end - start) * HOP) as f32).sqrt()
             })
             .collect();

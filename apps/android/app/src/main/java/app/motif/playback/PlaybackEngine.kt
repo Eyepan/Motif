@@ -2,6 +2,7 @@ package app.motif.playback
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -11,7 +12,6 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import app.motif.data.LibraryStore
 import app.motif.data.Track
-import app.motif.dsp.MotifDsp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 
 data class PlayerState(
     val queue: List<Track> = emptyList(),
@@ -39,9 +40,11 @@ data class PlayerState(
 /**
  * Lossless playback on Media3 ExoPlayer: original files, no transcoding,
  * gapless between tracks. With "Mix into next" on, the end of each track is
- * blended into the next on a second player: the incoming track is
- * tempo-matched (pitch kept) and the two crossfade on the DSP core's
- * equal-power curve, then the main player takes over at the same spot.
+ * blended into the next on a second player, following a plan from the DSP
+ * core: with beat grids on both tracks the blend runs phrase-aligned from
+ * downbeat to downbeat with the incoming track tempo-matched (pitch kept) and
+ * held on the beat; without, it's a tempo-matched crossfade. Then the main
+ * player takes over at the same spot.
  *
  * [player] is the main deck; PlaybackService wraps it in a MediaSession so the
  * notification, lock screen, headset buttons and Bluetooth all drive it.
@@ -59,6 +62,8 @@ class PlaybackEngine(
     val state: StateFlow<PlayerState> = _state.asStateFlow()
 
     private var helper: ExoPlayer? = null
+    /** Whether the helper is playing in a blend, rather than loaded ahead of one. */
+    private var helperLive = false
     private var mixJob: Job? = null
     private var handingOff = false
     private var ticker: Job? = null
@@ -69,7 +74,7 @@ class PlaybackEngine(
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Keep the helper deck in step with play/pause, except while the main deck rebuffers during hand-off.
-                if (!handingOff) helper?.let { if (isPlaying) it.play() else it.pause() }
+                if (!handingOff && helperLive) helper?.let { if (isPlaying) it.play() else it.pause() }
                 if (isPlaying) startTicker()
             }
 
@@ -88,6 +93,8 @@ class PlaybackEngine(
         player.prepare()
         player.play()
     }
+
+    fun pause() = player.pause()
 
     fun togglePlayPause() {
         if (player.isPlaying) player.pause() else {
@@ -158,47 +165,72 @@ class PlaybackEngine(
 
     // region Mixing
 
+    private fun outPosition(): Double = player.currentPosition / 1000.0
+
     private fun startMixIfDue() {
         val s = _state.value
         if (!s.mixIntoNext || mixJob?.isActive == true || !player.isPlaying) return
         val outgoing = s.current ?: return
         val incoming = s.upNext ?: return
         val duration = player.duration.takeIf { it != C.TIME_UNSET } ?: return
-        val remainingMs = duration - player.currentPosition
-        val lengthMs = (Mixing.mixLength(outgoing) * 1000).toLong()
-        if (remainingMs in 2_000..lengthMs) beginMix(outgoing, incoming, s.currentIndex + 1, remainingMs)
+        val plan = Mixing.plan(outgoing, incoming, duration / 1000.0)
+        val pos = outPosition()
+        if (pos >= plan.outStart - PRELOAD_SECONDS && pos < plan.outStart + plan.length - 2) {
+            val index = s.currentIndex + 1
+            mixJob = scope.launch { blend(plan, incoming, index) }
+        }
     }
 
-    private fun beginMix(outgoing: Track, incoming: Track, index: Int, remainingMs: Long) {
+    /**
+     * Loads the incoming track on a helper deck a few seconds early, starts it
+     * on the blend's first downbeat, then follows the plan: crossfade on the
+     * DSP core's equal-power curve, and keep the incoming track on the beat by
+     * jumping (only while it's still quiet) or nudging its speed.
+     */
+    private suspend fun blend(plan: MixPlan, incoming: Track, index: Int) {
         val deck = buildPlayer(handleFocus = false).apply {
-            setMediaItem(mediaItem(incoming))
-            playbackParameters = PlaybackParameters(Mixing.tempoRatio(outgoing, incoming).toFloat())
+            setMediaItem(mediaItem(incoming), (plan.inPositionAt(outPosition()) * 1000).toLong())
+            playbackParameters = PlaybackParameters(plan.rate.toFloat())
             volume = 0f
             prepare()
-            play()
         }
         helper = deck
-        _state.update { it.copy(isMixing = true) }
-        val startPos = player.currentPosition
-        val fadeMs = (remainingMs - 300).coerceAtLeast(1)
-        mixJob = scope.launch {
-            // Fade on the main deck's clock, so pausing pauses the blend.
-            while (isActive) {
-                val t = ((player.currentPosition - startPos).toFloat() / fadeMs).coerceIn(0f, 1f)
-                val (a, b) = MotifDsp.crossfade(t)
-                player.volume = a
-                deck.volume = b
-                if (t >= 1f) break
-                delay(40)
-            }
-            handOff(deck, index)
+        // Wait for the start on the main deck's clock, so pausing waits too.
+        while (outPosition() < plan.outStart) {
+            delay(((plan.outStart - outPosition()) * 1000).toLong().coerceIn(5, 200))
         }
+        // Started late (the blend was turned on mid-way): catch up first.
+        val target = plan.inPositionAt(outPosition())
+        if (abs(deck.currentPosition / 1000.0 - target) > 0.025) deck.seekTo((target * 1000).toLong())
+        helperLive = true
+        if (player.isPlaying) deck.play()
+        _state.update { it.copy(isMixing = true) }
+
+        var lastSeek = 0L
+        while (true) {
+            val step = Mixing.follow(plan, outPosition(), deck.currentPosition / 1000.0)
+            player.volume = step.gainOut
+            deck.volume = step.gainIn
+            val settled = deck.playbackState == Player.STATE_READY && deck.isPlaying
+            val now = SystemClock.elapsedRealtime()
+            if (step.seekTo != null) {
+                // Give each jump time to land before judging it.
+                if (settled && now - lastSeek > 500) {
+                    deck.seekTo((step.seekTo * 1000).toLong())
+                    lastSeek = now
+                }
+            } else if (abs(deck.playbackParameters.speed - step.speed) > 1e-4) {
+                deck.playbackParameters = PlaybackParameters(step.speed.toFloat())
+            }
+            if (step.progress >= 1.0) break
+            delay(40)
+        }
+        handOff(deck, index, plan.rate.toFloat())
     }
 
     /** Moves the main deck onto the incoming track where the helper is, then retires the helper. */
-    private suspend fun handOff(deck: ExoPlayer, index: Int) {
+    private suspend fun handOff(deck: ExoPlayer, index: Int, speed: Float) {
         handingOff = true
-        val speed = deck.playbackParameters.speed
         player.volume = 0f
         player.playbackParameters = PlaybackParameters(speed)
         // Aim slightly ahead: the helper keeps playing while the main deck buffers.
@@ -230,6 +262,7 @@ class PlaybackEngine(
     private fun retireHelper() {
         helper?.release()
         helper = null
+        helperLive = false
     }
 
     // endregion
@@ -257,4 +290,9 @@ class PlaybackEngine(
                     .build(),
             )
             .build()
+
+    private companion object {
+        /** How early the incoming track is loaded before a blend. */
+        const val PRELOAD_SECONDS = 6.0
+    }
 }

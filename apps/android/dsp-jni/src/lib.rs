@@ -2,15 +2,25 @@
 //! with the `external fun` declarations there. Analyzer handles are boxed
 //! `Analyzer`s passed to Kotlin as `Long`.
 
-use jni::objects::{JClass, JFloatArray};
-use jni::sys::{jfloat, jfloatArray, jint, jlong};
+use jni::objects::{JClass, JDoubleArray, JFloatArray};
+use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jfloatArray, jint, jlong, JNI_TRUE};
 use jni::JNIEnv;
 use motif_dsp::analysis::Analyzer;
 use motif_dsp::crossfade::{self, Curve};
+use motif_dsp::mix::{self, Action, Plan, Timing};
+use motif_dsp::{deck_sync, MotifTiming};
 
 fn float_array(env: &mut JNIEnv, values: &[f32]) -> jfloatArray {
     let Ok(array) = env.new_float_array(values.len() as i32) else { return std::ptr::null_mut() };
     if env.set_float_array_region(&array, 0, values).is_err() {
+        return std::ptr::null_mut();
+    }
+    array.into_raw()
+}
+
+fn double_array(env: &mut JNIEnv, values: &[f64]) -> jdoubleArray {
+    let Ok(array) = env.new_double_array(values.len() as i32) else { return std::ptr::null_mut() };
+    if env.set_double_array_region(&array, 0, values).is_err() {
         return std::ptr::null_mut();
     }
     array.into_raw()
@@ -50,7 +60,8 @@ pub extern "system" fn Java_app_motif_dsp_MotifDsp_analyzerPush(
     }
 }
 
-/// Returns [peak dB, RMS dB, BPM, Camelot number (0 = none), minor (1/0)].
+/// Returns [peak dB, RMS dB, BPM, Camelot number (0 = none), minor (1/0),
+/// first downbeat in seconds (-1 = no beat grid)].
 #[no_mangle]
 pub extern "system" fn Java_app_motif_dsp_MotifDsp_analyzerFinish(
     mut env: JNIEnv,
@@ -61,7 +72,7 @@ pub extern "system" fn Java_app_motif_dsp_MotifDsp_analyzerFinish(
     let Some(analyzer) = (unsafe { (handle as *const Analyzer).as_ref() }) else { return std::ptr::null_mut() };
     let r = analyzer.finish();
     let (number, minor) = r.key.map_or((0.0, 0.0), |k| (k.camelot_number() as f32, k.minor as u8 as f32));
-    float_array(&mut env, &[r.peak_db, r.rms_db, r.bpm, number, minor])
+    float_array(&mut env, &[r.peak_db, r.rms_db, r.bpm, number, minor, r.first_downbeat.unwrap_or(-1.0)])
 }
 
 /// `count` waveform overview values in 0...1.
@@ -97,4 +108,72 @@ pub extern "system" fn Java_app_motif_dsp_MotifDsp_crossfadeGains(
     let Some(curve) = Curve::from_raw(curve as u32) else { return std::ptr::null_mut() };
     let (a, b) = crossfade::gains(t, curve);
     float_array(&mut env, &[a, b])
+}
+
+/// [out start, in start, length, rate, lock] for a blend from the outgoing
+/// track into the incoming one; see `mix::plan`.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_mixPlan(
+    mut env: JNIEnv,
+    _class: JClass,
+    out_bpm: jdouble,
+    out_downbeat: jdouble,
+    out_duration: jdouble,
+    in_bpm: jdouble,
+    in_downbeat: jdouble,
+    in_duration: jdouble,
+) -> jdoubleArray {
+    let p = mix::plan(
+        &Timing { bpm: out_bpm, first_downbeat: out_downbeat, duration: out_duration },
+        &Timing { bpm: in_bpm, first_downbeat: in_downbeat, duration: in_duration },
+    );
+    double_array(&mut env, &[p.out_start, p.in_start, p.length, p.rate, p.lock])
+}
+
+/// [progress, outgoing gain, incoming gain, action (0 = set speed, 1 = seek),
+/// value] for a plan from `mixPlan`; see `mix::follow`.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_mixFollow(
+    mut env: JNIEnv,
+    _class: JClass,
+    plan: JDoubleArray,
+    out_pos: jdouble,
+    in_pos: jdouble,
+) -> jdoubleArray {
+    let mut p = [0f64; 5];
+    if env.get_double_array_region(&plan, 0, &mut p).is_err() {
+        return std::ptr::null_mut();
+    }
+    let plan = Plan { out_start: p[0], in_start: p[1], length: p[2], rate: p[3], lock: p[4] };
+    let f = mix::follow(&plan, out_pos, in_pos);
+    let (action, value) = match f.action {
+        Action::Speed(s) => (0.0, s),
+        Action::Seek(x) => (1.0, x),
+    };
+    double_array(&mut env, &[f.progress, f.gain_out as f64, f.gain_in as f64, action, value])
+}
+
+/// [speed, position] putting the slave deck on the master's tempo and beat,
+/// or null when they can't sync; see `mix::sync`.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_deckSync(
+    mut env: JNIEnv,
+    _class: JClass,
+    master_bpm: jdouble,
+    master_downbeat: jdouble,
+    master_pos: jdouble,
+    master_speed: jdouble,
+    slave_bpm: jdouble,
+    slave_downbeat: jdouble,
+    slave_pos: jdouble,
+    snap: jboolean,
+) -> jdoubleArray {
+    let master = MotifTiming { bpm: master_bpm, first_downbeat: master_downbeat, duration: 0.0 };
+    let slave = MotifTiming { bpm: slave_bpm, first_downbeat: slave_downbeat, duration: 0.0 };
+    match deck_sync(&master, master_pos, master_speed, &slave, slave_pos, snap == JNI_TRUE) {
+        Some((speed, pos)) => double_array(&mut env, &[speed, pos]),
+        None => std::ptr::null_mut(),
+    }
 }

@@ -9,7 +9,7 @@ apps/
   apple/      SwiftUI app for iOS + macOS (one multiplatform target) and MotifKit, its Swift package
   android/    Kotlin / Jetpack Compose app (not started)
 core/
-  dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo estimation, crossfade curves
+  dsp/        Portable DSP core in Rust with a C ABI: loudness, tempo, key, beat grids, crossfades, beat-aligned blend planning and deck sync
 schemas/      Shared library schema (SQLite) and the track JSON schema used for sync/import
 docs/         Design notes, including where music comes from
 ```

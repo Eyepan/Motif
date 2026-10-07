@@ -26,7 +26,8 @@ class LibraryStore(private val context: Context) {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Android shipped at v2; add steps here when schemas/library.sql changes.
+            // Android shipped at v2. Steps mirror schemas/library.sql's history.
+            if (oldVersion < 3) db.execSQL("ALTER TABLE tracks ADD COLUMN first_downbeat REAL")
         }
 
         override fun onConfigure(db: SQLiteDatabase) {
@@ -46,13 +47,21 @@ class LibraryStore(private val context: Context) {
         refresh()
     }
 
-    suspend fun updateAnalysis(id: String, bpm: Double?, loudnessDb: Double?, key: String?, waveform: ByteArray?) =
+    suspend fun updateAnalysis(
+        id: String,
+        bpm: Double?,
+        loudnessDb: Double?,
+        key: String?,
+        waveform: ByteArray?,
+        firstDownbeat: Double?,
+    ) =
         withContext(Dispatchers.IO) {
             val values = ContentValues().apply {
                 put("bpm", bpm)
                 put("loudness_db", loudnessDb)
                 put("musical_key", key)
                 put("waveform", waveform)
+                put("first_downbeat", firstDownbeat)
             }
             helper.writableDatabase.update("tracks", values, "id = ?", arrayOf(id))
             refresh()
@@ -85,7 +94,7 @@ class LibraryStore(private val context: Context) {
 
     companion object {
         /** Matches `PRAGMA user_version` in schemas/library.sql. */
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
         const val WAVEFORM_LENGTH = 128
     }
 }
@@ -108,6 +117,7 @@ private fun Track.toValues() = ContentValues().apply {
     put("loudness_db", loudnessDb)
     put("musical_key", musicalKey)
     put("waveform", waveform)
+    put("first_downbeat", firstDownbeat)
     put("added_at", addedAt)
 }
 
@@ -133,5 +143,6 @@ private fun Cursor.toTrack() = Track(
     loudnessDb = double("loudness_db"),
     musicalKey = str("musical_key"),
     waveform = getColumnIndexOrThrow("waveform").let { if (isNull(it)) null else getBlob(it) },
+    firstDownbeat = double("first_downbeat"),
     addedAt = getLong(getColumnIndexOrThrow("added_at")),
 )

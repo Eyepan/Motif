@@ -1,6 +1,6 @@
 -- Motif library schema, shared by every platform. Bump user_version on change
 -- and add a migration step in each app's store.
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 
 CREATE TABLE IF NOT EXISTS tracks (
     id              TEXT PRIMARY KEY,          -- UUID
@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     loudness_db     REAL,
     musical_key     TEXT,                      -- Camelot notation, e.g. 8A (added in v2)
     waveform        BLOB,                      -- 128 loudness bytes, 0-255 (added in v2)
+    first_downbeat  REAL,                      -- seconds to the beat grid's first downbeat; beats every 60/bpm s (added in v3)
     added_at        INTEGER NOT NULL           -- unix seconds
 );
 
