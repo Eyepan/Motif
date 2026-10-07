@@ -43,10 +43,10 @@ class ArtworkStore(filesDir: File) {
 
     /**
      * Extracts art for a newly imported track: the embedded picture first, else
-     * [folderCover] (bytes of cover.jpg or similar from the same folder).
+     * [fallback] (a cover.jpg from the same folder, or a catalog's art for a download).
      */
-    suspend fun extract(trackId: String, audio: File, folderCover: ByteArray? = null) = withContext(Dispatchers.IO) {
-        val bytes = runCatching { embeddedPicture(audio) }.getOrNull() ?: folderCover
+    suspend fun extract(trackId: String, audio: File, fallback: ByteArray? = null) = withContext(Dispatchers.IO) {
+        val bytes = runCatching { embeddedPicture(audio) }.getOrNull() ?: fallback
         val saved = bytes != null && runCatching { save(bytes, fileFor(trackId)) }.getOrDefault(false)
         if (saved) {
             markerFor(trackId).delete()

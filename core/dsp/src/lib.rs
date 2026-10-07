@@ -4,6 +4,7 @@
 pub mod analysis;
 pub mod crossfade;
 pub mod key;
+pub mod meta;
 
 use analysis::Analyzer;
 

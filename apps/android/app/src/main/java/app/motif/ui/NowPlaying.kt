@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.data.Track
 import app.motif.data.formatTime
+import app.motif.playback.MixMatch
 import app.motif.playback.Mixing
 import app.motif.playback.PlaybackEngine
 import app.motif.playback.PlayerState
@@ -231,14 +232,14 @@ private fun rememberBackdropTint(track: Track): Color {
     return tint ?: fallback
 }
 
-/** BPM, Camelot key and lossless chips under the title; "Not analysed" until analysis has run. */
+/** BPM and Camelot key chips in their colours, and a lossless chip, under the title; "Not analysed" until analysis has run. */
 @Composable
 private fun TrackChips(track: Track) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (track.bpm == null && track.musicalKey == null) {
             Chip("Not analysed", Motif.secondary)
         } else {
-            track.bpm?.let { Chip(track.bpmText, Motif.badge, mono = true) }
+            track.bpm?.let { Chip(track.bpmText, Motif.bpmColor(it), mono = true) }
             track.musicalKey?.let { Chip(it, Motif.keyColor(it), mono = true) }
         }
         if (track.isLossless) Chip("Lossless", Motif.done)
@@ -289,9 +290,11 @@ private fun UpNext(state: PlayerState, engine: PlaybackEngine, onOpenQueue: () -
                     Text(track.title, fontSize = 15.sp, color = Motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(track.artist ?: "Unknown artist", fontSize = 13.sp, color = Motif.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                // Boxed when it mixes with what's playing, as in the library.
+                val current = state.current
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(track.bpmText, style = Motif.mono(12.sp), color = Motif.secondary)
-                    Text(track.musicalKey ?: "—", style = Motif.mono(12.sp), color = Motif.keyColor(track.musicalKey))
+                    MixValue(track.bpmText, Motif.bpmColor(track.bpm), current != null && MixMatch.tempos(current, track))
+                    MixValue(track.musicalKey ?: "—", Motif.keyColor(track.musicalKey), current != null && MixMatch.keys(current, track))
                 }
             }
         }
@@ -346,7 +349,7 @@ private fun QueueSheet(state: PlayerState, engine: PlaybackEngine, onDismiss: ()
         Text("Up Next", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
         LazyColumn(Modifier.fillMaxHeight(0.7f)) {
             itemsIndexed(state.queue, key = { i, t -> "$i-${t.id}" }) { index, track ->
-                TrackRow(track, index == state.currentIndex, onClick = { engine.skipTo(index) })
+                TrackRow(track, index == state.currentIndex, onClick = { engine.skipTo(index) }, mixWith = state.current)
             }
         }
     }

@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.data.ArtworkStore
 import app.motif.data.Track
+import app.motif.playback.MixMatch
 import app.motif.ui.theme.Motif
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -145,11 +146,24 @@ fun AlbumTile(title: String, artist: String?, letter: String, artIds: List<Strin
     }
 }
 
-/** Song row: art, title, format badge + artist, and BPM / Camelot key on the right. Long-press for actions. */
+/**
+ * Song row: art, title, format badge + artist, and colour-coded BPM / Camelot
+ * key on the right. When [mixWith] is set (the playing track), a BPM or key
+ * that mixes with it is boxed. Long-press for actions.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun TrackRow(track: Track, isCurrent: Boolean, onClick: () -> Unit, onDelete: (() -> Unit)? = null) {
+fun TrackRow(
+    track: Track,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null,
+    mixWith: Track? = null,
+) {
     var menu by remember { mutableStateOf(false) }
+    val other = mixWith?.takeIf { it.id != track.id }
+    val tempoMatch = other != null && MixMatch.tempos(other, track)
+    val keyMatch = other != null && MixMatch.keys(other, track)
     Box {
         Row(
             Modifier
@@ -157,7 +171,15 @@ fun TrackRow(track: Track, isCurrent: Boolean, onClick: () -> Unit, onDelete: ((
                 .heightIn(min = 60.dp)
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .semantics(mergeDescendants = true) {
-                    contentDescription = listOfNotNull(track.title, track.artist, track.bpmText, track.musicalKey, track.format).joinToString(", ")
+                    contentDescription = listOfNotNull(
+                        track.title, track.artist, track.bpmText, track.musicalKey, track.format,
+                        when {
+                            tempoMatch && keyMatch -> "tempo and key mix with now playing"
+                            tempoMatch -> "tempo mixes with now playing"
+                            keyMatch -> "key mixes with now playing"
+                            else -> null
+                        },
+                    ).joinToString(", ")
                 },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -174,8 +196,8 @@ fun TrackRow(track: Track, isCurrent: Boolean, onClick: () -> Unit, onDelete: ((
                 }
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(track.bpmText, style = Motif.mono(12.sp), color = Motif.secondary)
-                Text(track.musicalKey ?: "—", style = Motif.mono(12.sp), color = Motif.keyColor(track.musicalKey))
+                MixValue(track.bpmText, Motif.bpmColor(track.bpm), tempoMatch)
+                MixValue(track.musicalKey ?: "—", Motif.keyColor(track.musicalKey), keyMatch)
             }
         }
         if (onDelete != null) {
@@ -184,6 +206,20 @@ fun TrackRow(track: Track, isCurrent: Boolean, onClick: () -> Unit, onDelete: ((
             }
         }
     }
+}
+
+/** BPM or key in its colour; boxed when it mixes with the playing track, so a match never relies on colour alone. */
+@Composable
+fun MixValue(text: String, color: Color, match: Boolean) {
+    val shape = RoundedCornerShape(4.dp)
+    Text(
+        text,
+        style = Motif.mono(12.sp, if (match) FontWeight.Bold else FontWeight.Normal),
+        color = color,
+        modifier = Modifier
+            .then(if (match) Modifier.background(color.copy(alpha = 0.14f), shape).border(1.dp, color, shape) else Modifier)
+            .padding(horizontal = 5.dp, vertical = 1.dp),
+    )
 }
 
 /**

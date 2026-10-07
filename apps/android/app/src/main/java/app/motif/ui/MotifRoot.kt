@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
@@ -32,9 +33,10 @@ enum class Tab(val label: String, val icon: ImageVector) {
     Crates("Crates", Icons.Outlined.ViewAgenda),
     Mix("Mix", Icons.Outlined.Tune),
     Search("Search", Icons.Outlined.Search),
+    Discover("Discover", Icons.Outlined.Explore),
 }
 
-/** Tabs (Library, Crates, Mix, Search), the mini player above the bar, and the Now Playing / Add Music sheets. */
+/** Tabs (Library, Crates, Mix, Search, Discover), the mini player above the bar, and the Now Playing / Add Music sheets. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MotifRoot(app: MotifApp) {
@@ -75,7 +77,7 @@ fun MotifRoot(app: MotifApp) {
         when (tab) {
             Tab.Library -> LibraryScreen(
                 tracks = tracks,
-                currentId = player.current?.id,
+                current = player.current,
                 onPlay = { list, index -> app.playback.play(list, index) },
                 onDelete = app::delete,
                 onImport = { showImport = true },
@@ -90,10 +92,11 @@ fun MotifRoot(app: MotifApp) {
             )
             Tab.Search -> SearchScreen(
                 tracks = tracks,
-                currentId = player.current?.id,
+                current = player.current,
                 onPlay = { list, index -> app.playback.play(list, index) },
                 modifier = modifier,
             )
+            Tab.Discover -> DiscoverScreen(app, modifier)
         }
     }
 
@@ -101,6 +104,6 @@ fun MotifRoot(app: MotifApp) {
         NowPlayingSheet(player, app.playback, onDismiss = { showNowPlaying = false })
     }
     if (showImport) {
-        ImportSheet(app, onDismiss = { showImport = false })
+        ImportSheet(app, onDismiss = { showImport = false }, onDiscover = { showImport = false; tab = Tab.Discover })
     }
 }

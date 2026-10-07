@@ -26,11 +26,41 @@ enum Theme {
         .system(size: size, weight: weight, design: .monospaced)
     }
 
-    /// Camelot keys get a colour per wheel position; minor keys are a touch softer.
+    /// Camelot key colours from `schemas/mix-colours.json`: neighbours on the
+    /// wheel get neighbouring hues, majors (B) are lighter than their relative minors (A).
+    static let keyColors: [String: UInt32] = [
+        "1A": 0xEF958E, "1B": 0xFDB5AF,
+        "2A": 0xE79E6B, "2B": 0xFEB98B,
+        "3A": 0xD1AC5A, "3B": 0xF1C45E,
+        "4A": 0xAFB965, "4B": 0xC8D56C,
+        "5A": 0x84C485, "5B": 0x93E195,
+        "6A": 0x58C8AD, "6B": 0x5AE6C6,
+        "7A": 0x47C5D2, "7B": 0x40E2F3,
+        "8A": 0x64BCED, "8B": 0x8FD5FD,
+        "9A": 0x8FB0F8, "9B": 0xB3CAFC,
+        "10A": 0xB6A3F0, "10B": 0xCEC0FD,
+        "11A": 0xD599D8, "11B": 0xF5ADF9,
+        "12A": 0xE893B5, "12B": 0xFDB1CE,
+    ]
+
+    /// BPM colours from `schemas/mix-colours.json`, one per 1/24 octave from 120 BPM.
+    static let bpmColors: [UInt32] = [
+        0xF8A49D, 0xF6A88D, 0xF0AD7F, 0xE7B375, 0xDBB970, 0xCDC072,
+        0xBBC679, 0xA8CB86, 0x95CF96, 0x82D2A8, 0x71D3BA, 0x67D2CC,
+        0x65D0DC, 0x6CCDEA, 0x7AC8F5, 0x8CC3FC, 0x9EBDFF, 0xB1B7FD,
+        0xC2B1F8, 0xD2ACEE, 0xDFA8E1, 0xEAA4D2, 0xF2A3C1, 0xF6A3AF,
+    ]
+
     static func keyColor(_ camelot: String?) -> Color {
-        guard let camelot, let n = Int(camelot.dropLast()), (1...12).contains(n) else { return secondary }
-        let minor = camelot.hasSuffix("A")
-        return Color(hue: Double(n - 1) / 12, saturation: minor ? 0.35 : 0.45, brightness: 0.92)
+        guard let camelot, let hex = keyColors[camelot] else { return secondary }
+        return Color(hex: hex)
+    }
+
+    /// Tempos a few BPM apart get neighbouring hues; half and double time share a colour.
+    static func bpmColor(_ bpm: Double?) -> Color {
+        guard let bpm, bpm > 0 else { return secondary }
+        let bin = Int((24 * log2(bpm / 120)).rounded())
+        return Color(hex: bpmColors[((bin % 24) + 24) % 24])
     }
 
     /// Flat art placeholder colours (background, letter), stable per album.
