@@ -18,6 +18,7 @@ targets:
     type: application
     supportedDestinations: [iOS, macOS]
     sources: [App]
+    scheme: {}
     dependencies:
       - package: MotifKit
     settings:

@@ -25,22 +25,38 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
     public var licenseURL: URL?
     public var bpm: Double?
     public var loudnessDb: Double?
+    /// Camelot notation, e.g. "8A".
+    public var musicalKey: String?
+    /// Loudness overview for drawing, `LibraryStore.waveformLength` bytes. Local cache, not synced.
+    public var waveform: [UInt8]?
     public var addedAt: Date
 
     public init(
         id: UUID = UUID(), title: String, artist: String? = nil, album: String? = nil,
         durationMs: Int, filePath: String, format: String, sampleRate: Int? = nil,
         bitDepth: Int? = nil, channels: Int? = nil, source: Source, sourceRef: String? = nil,
-        licenseURL: URL? = nil, bpm: Double? = nil, loudnessDb: Double? = nil, addedAt: Date = .now
+        licenseURL: URL? = nil, bpm: Double? = nil, loudnessDb: Double? = nil, musicalKey: String? = nil,
+        waveform: [UInt8]? = nil, addedAt: Date = .now
     ) {
         self.id = id; self.title = title; self.artist = artist; self.album = album
         self.durationMs = durationMs; self.filePath = filePath; self.format = format
         self.sampleRate = sampleRate; self.bitDepth = bitDepth; self.channels = channels
         self.source = source; self.sourceRef = sourceRef; self.licenseURL = licenseURL
-        self.bpm = bpm; self.loudnessDb = loudnessDb; self.addedAt = addedAt
+        self.bpm = bpm; self.loudnessDb = loudnessDb; self.musicalKey = musicalKey
+        self.waveform = waveform; self.addedAt = addedAt
     }
 
     public var isLossless: Bool { ["flac", "wav", "alac", "aiff"].contains(format) }
+
+    /// "FLAC 24/96", for dense lists.
+    public var shortQualityLabel: String {
+        guard let rate = sampleRate else { return format.uppercased() }
+        let khz = Double(rate) / 1000
+        let rateText = khz.rounded() == khz ? "\(Int(khz))" : String(format: "%.1f", khz)
+        return bitDepth.map { "\(format.uppercased()) \($0)/\(rateText)" } ?? "\(format.uppercased()) \(rateText)k"
+    }
+
+    public var duration: TimeInterval { Double(durationMs) / 1000 }
 
     /// "FLAC · 24-bit / 96 kHz"
     public var qualityLabel: String {

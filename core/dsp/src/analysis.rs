@@ -1,4 +1,4 @@
-//! Streaming track analysis: peak, RMS loudness and tempo.
+//! Streaming track analysis: peak, RMS loudness, tempo and key.
 //!
 //! Audio is pushed in chunks, so a whole track never has to sit in memory.
 //! Only a per-hop energy envelope is retained (one f32 per `HOP` frames,
@@ -6,6 +6,8 @@
 
 /// Frames per onset-envelope hop.
 pub const HOP: usize = 512;
+
+use crate::key::{Key, KeyDetector};
 
 const MIN_BPM: f32 = 70.0;
 const MAX_BPM: f32 = 180.0;
@@ -18,6 +20,7 @@ pub struct Analysis {
     pub rms_db: f32,
     /// Estimated tempo, or 0 when no stable beat was found.
     pub bpm: f32,
+    pub key: Option<Key>,
 }
 
 pub struct Analyzer {
@@ -29,6 +32,7 @@ pub struct Analyzer {
     hop_energy: f64,
     hop_fill: usize,
     envelope: Vec<f32>,
+    key: KeyDetector,
 }
 
 impl Analyzer {
@@ -42,6 +46,7 @@ impl Analyzer {
             hop_energy: 0.0,
             hop_fill: 0,
             envelope: Vec::new(),
+            key: KeyDetector::new(sample_rate),
         }
     }
 
@@ -57,6 +62,7 @@ impl Analyzer {
             }
             self.samples_seen += ch as u64;
             mono /= ch as f32;
+            self.key.push(mono);
             self.hop_energy += (mono as f64) * (mono as f64);
             self.hop_fill += 1;
             if self.hop_fill == HOP {
@@ -77,7 +83,34 @@ impl Analyzer {
             peak_db: to_db(self.peak),
             rms_db: to_db(rms),
             bpm: estimate_bpm(&self.envelope, self.sample_rate as f32 / HOP as f32),
+            key: self.key.finish(),
         }
+    }
+}
+
+impl Analyzer {
+    /// Loudness overview for drawing a waveform: `buckets` values in 0...1,
+    /// each the RMS of its slice of the track, normalised to the loudest slice.
+    pub fn overview(&self, buckets: usize) -> Vec<f32> {
+        if buckets == 0 || self.envelope.is_empty() {
+            return vec![0.0; buckets];
+        }
+        let n = self.envelope.len();
+        let mut out: Vec<f32> = (0..buckets)
+            .map(|b| {
+                let (start, end) = (b * n / buckets, ((b + 1) * n / buckets).max(b * n / buckets + 1).min(n));
+                if start >= n {
+                    return 0.0;
+                }
+                let energy: f32 = self.envelope[start..end].iter().sum();
+                (energy / ((end - start) * HOP) as f32).sqrt()
+            })
+            .collect();
+        let max = out.iter().cloned().fold(0.0f32, f32::max);
+        if max > 0.0 {
+            out.iter_mut().for_each(|v| *v /= max);
+        }
+        out
     }
 }
 
@@ -179,6 +212,18 @@ mod tests {
         assert_eq!(r.bpm, 0.0);
         assert_eq!(r.peak_db, f32::NEG_INFINITY);
         assert_eq!(r.rms_db, f32::NEG_INFINITY);
+    }
+
+    #[test]
+    fn overview_tracks_loudness() {
+        let mut a = Analyzer::new(44_100, 1);
+        a.push(&vec![0.1; 44_100]);
+        a.push(&vec![0.4; 44_100]);
+        let o = a.overview(4);
+        assert_eq!(o.len(), 4);
+        assert!((o[3] - 1.0).abs() < 1e-3);
+        assert!((o[0] - 0.25).abs() < 1e-2);
+        assert_eq!(Analyzer::new(44_100, 1).overview(3), vec![0.0; 3]);
     }
 
     #[test]

@@ -55,7 +55,7 @@ struct DiscoverView: View {
     @ViewBuilder
     private func downloadButton(for result: SourceResult) -> some View {
         if done.contains(result.id) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.done)
         } else if downloading.contains(result.id) {
             ProgressView().controlSize(.small)
         } else {
@@ -79,7 +79,7 @@ struct DiscoverView: View {
         defer { downloading.remove(result.id) }
         do {
             for file in try await source.downloads(for: result) {
-                try await model.importer.importDownload(file, from: source.id, result: result)
+                try await model.importer.importDownload(file, from: source.id, result: result, analyze: model.analyzeOnImport)
                 await model.refresh()
             }
             done.insert(result.id)

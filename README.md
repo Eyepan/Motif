@@ -22,22 +22,26 @@ docs/         Design notes, including where music comes from
 - Native media integration: background audio, lock screen / Control Center, remote commands.
 - Share `core/` and `schemas/`, never UI.
 
+The UI follows the approved design: dark grounds, neon green accent `#C6F432`, SF Mono for BPM, key and format, Camelot key colours.
+
 ## Building
 
-Apple (macOS with Xcode 16+):
-
-```sh
-brew install xcodegen
-cd apps/apple && xcodegen && open Motif.xcodeproj
-swift test            # MotifKit unit tests
-```
-
-DSP core:
+DSP core (any platform):
 
 ```sh
 cd core/dsp && cargo test
-./scripts/build-apple.sh   # builds MotifDSP.xcframework for iOS, simulator and macOS
 ```
+
+Apple (macOS with Xcode 16+ and rustup). The app links the DSP core, so build it first:
+
+```sh
+core/dsp/scripts/build-apple.sh   # writes apps/apple/Frameworks/MotifDSP.xcframework
+brew install xcodegen
+cd apps/apple && xcodegen && open Motif.xcodeproj
+swift test                        # MotifKit unit tests
+```
+
+Rerun the script after changing anything in `core/dsp`.
 
 ## Music sources
 
