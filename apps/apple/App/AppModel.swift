@@ -68,7 +68,7 @@ final class AppModel {
         player = PlaybackEngine(store: store)
         importer = ImportService(store: store)
         let jamendo = JamendoSource()
-        sources = [InternetArchiveSource()] + (jamendo.isConfigured ? [jamendo] : [])
+        sources = (jamendo.isConfigured ? [jamendo] : []) + [InternetArchiveSource(), AudiusSource()]
         analyzeOnImport = UserDefaults.standard.object(forKey: "analyzeOnImport") as? Bool ?? true
         player.mixIntoNext = UserDefaults.standard.bool(forKey: "mixIntoNext")
     }

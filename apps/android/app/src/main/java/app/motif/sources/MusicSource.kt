@@ -11,6 +11,8 @@ interface MusicSource {
     /** Stored in the `source` column of every track it supplies. */
     val id: String
     val displayName: String
+    /** For tight spaces such as the catalog picker. */
+    val shortName: String get() = displayName
     val isConfigured: Boolean get() = true
 
     suspend fun search(query: String): List<SourceResult>

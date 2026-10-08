@@ -8,12 +8,14 @@ Motif downloads only audio the user is allowed to keep, and prefers lossless for
 | Bandcamp purchases | FLAC, WAV, ALAC | Via local import | Bandcamp has no public download API. Download the purchase as FLAC, unzip, import. |
 | Internet Archive | FLAC, WAV (varies per item) | Implemented (Apple, Android) | Public search and metadata APIs. Each item carries its own license; Motif stores the license URL with the track. |
 | Jamendo | FLAC where offered | Implemented (Apple, Android), needs a client id | Creative Commons catalog. Requires a free API client id from developer.jamendo.com: `JAMENDO_CLIENT_ID` in the Apple app's Info.plist; on Android the `JAMENDO_CLIENT_ID` build environment variable (a CI secret), or pasted into Discover. |
+| Audius | Original upload (WAV, FLAC or MP3) when the artist allows downloads | Implemented (Apple, Android) | Artists upload their own music and choose per track whether fans may download it. Public API (`api.audius.co/v1`), no key. Tracks gated behind a purchase or follow are skipped. |
 | Free Music Archive | MP3 mostly | Not possible | No public API since the 2019 move to Tribe of Noise, so Motif can't search or download it without scraping the site. |
 | YouTube Music | No | Not supported | No lossless audio, and downloading from it violates its terms of service. |
+| MassTamilan and similar film-music sites | — | Not supported | They redistribute label releases (Think Music, Sony, Saregama and others) without a license from the labels. |
 
 ## Discover
 
-Discover searches a catalog, previews a result by streaming it, and downloads it with one tap straight into the library. On Android, downloaded files go through the same import as local files (bit-perfect copy, tags, on-device analysis); the catalog's title, artist and album fill any tag the file lacks, and the catalog's cover becomes the track's art. Downloads run in the app process two at a time and show in Add Music as well as on the result.
+Discover searches every catalog at once (or one, picked at the top); a catalog that can't be reached is named without hiding the others' results. A search that finds nothing says so, and links to Qobuz and Bandcamp searches for the same words, since most label releases are only sold there. Discover searches a catalog, previews a result by streaming it, and downloads it with one tap straight into the library. On Android, downloaded files go through the same import as local files (bit-perfect copy, tags, on-device analysis); the catalog's title, artist and album fill any tag the file lacks, and the catalog's cover becomes the track's art. Downloads run in the app process two at a time and show in Add Music as well as on the result.
 
 ## Buying inside Motif
 
