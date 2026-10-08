@@ -42,8 +42,9 @@ final class AccountModel {
     init(history: HistoryStore) {
         self.history = history
         let saved = UserDefaults.standard.string(forKey: "serverURL").flatMap(URL.init(string:))
-        serverURL = saved ?? MotifAPI.defaultBaseURL
-        let api = MotifAPI(baseURL: serverURL, tokens: KeychainTokenStore(server: serverURL))
+        let url = saved ?? MotifAPI.defaultBaseURL
+        serverURL = url
+        let api = MotifAPI(baseURL: url, tokens: KeychainTokenStore(server: url))
         self.api = api
         syncService = SyncService(api: api, history: history)
         showWelcome = !UserDefaults.standard.bool(forKey: "welcomeDone")
