@@ -10,6 +10,14 @@ publish = false
 name = "motif_dsp"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = ["archive"]
+# .zip reading for the Apple apps' Downloads import. Android reads zips with java.util.zip.
+archive = ["dep:zip"]
+
+[dependencies]
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -8,6 +8,7 @@ struct ImportSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var picking = false
+    @State private var pickingFolder = false
 
     var body: some View {
         @Bindable var model = model
@@ -17,6 +18,24 @@ struct ImportSheet: View {
                     Button { picking = true } label: {
                         SourceRow(glyph: "folder", title: "Files",
                                   detail: "iCloud Drive, On My iPhone, USB drives, SMB shares")
+                    }
+                    if let folder = model.watchedFolder {
+                        SourceRow(glyph: "arrow.down.circle", title: folder.lastPathComponent,
+                                  detail: "Read on every open. Albums, folders and .zip files; best copy kept")
+                            .swipeActions {
+                                Button("Stop", role: .destructive) { model.stopWatchingFolder() }
+                            }
+                    } else {
+                        Button { pickingFolder = true } label: {
+                            SourceRow(glyph: "arrow.down.circle", title: "Read from Downloads",
+                                      detail: "Pick a folder. Albums, folders and .zip files; best copy kept")
+                        }
+                        .fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in
+                            switch result {
+                            case .success(let url): model.watch(url)
+                            case .failure(let error): model.errorMessage = error.localizedDescription
+                            }
+                        }
                     }
                     NavigationLink {
                         DiscoverView()
@@ -111,7 +130,7 @@ struct ImportJobRow: View {
             }
             .font(.system(size: 15))
             ProgressView(value: fraction)
-                .tint(isDone ? Theme.done : Theme.accent)
+                .tint(isDone ? Theme.done : isSkipped ? Theme.secondary : Theme.accent)
             Text(status).font(.caption).foregroundStyle(isFailed ? .red : Theme.secondary)
         }
         .padding(.vertical, 4)
@@ -119,12 +138,13 @@ struct ImportJobRow: View {
 
     private var isDone: Bool { if case .done = job.stage { true } else { false } }
     private var isFailed: Bool { if case .failed = job.stage { true } else { false } }
+    private var isSkipped: Bool { if case .skipped = job.stage { true } else { false } }
 
     private var fraction: Double {
         switch job.stage {
         case .copying: 0.25
         case .analyzing: 0.6
-        case .done, .failed: 1
+        case .done, .skipped, .failed: 1
         }
     }
 
@@ -132,7 +152,7 @@ struct ImportJobRow: View {
         switch job.stage {
         case .copying: "Copying to library…"
         case .analyzing: "Analyzing tempo and key…"
-        case .failed(let message): message
+        case .failed(let message), .skipped(let message): message
         case .done(let track):
             ["Added", track.bpm.map { "\(Int($0.rounded())) BPM" }, track.musicalKey]
                 .compactMap { $0 }.joined(separator: " · ")

@@ -1,5 +1,7 @@
 package app.motif.ui
 
+import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -19,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +56,8 @@ fun ImportSheet(app: MotifApp, onDismiss: () -> Unit, onDiscover: () -> Unit) {
     val analyze by app.analyzeOnImport.collectAsStateWithLifecycle()
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { app.importer.importFiles(it) }
     val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(app.importer::importFolder) }
+    val watched by app.folderImporter.folder.collectAsStateWithLifecycle()
+    val pickWatched = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { it?.let(app.folderImporter::watch) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Motif.surface) {
         LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -70,6 +75,16 @@ fun ImportSheet(app: MotifApp, onDismiss: () -> Unit, onDiscover: () -> Unit) {
                     }
                     SourceRow(Icons.Outlined.Folder, "Folder", "A whole folder, including SD cards and USB drives") {
                         pickFolder.launch(null)
+                    }
+                    val folder = watched
+                    if (folder == null) {
+                        SourceRow(Icons.Outlined.Download, "Read from Downloads", "Pick a folder. Albums, folders and .zip files; best copy kept") {
+                            pickWatched.launch(null)
+                        }
+                    } else {
+                        SourceRow(Icons.Outlined.Download, "Reading ${folderName(folder)}", "Checked every time Motif opens. Tap to stop") {
+                            app.folderImporter.stop()
+                        }
                     }
                     SourceRow(Icons.Outlined.Explore, "Discover", "Search and download free lossless music from Jamendo and the Internet Archive", onDiscover)
                 }
@@ -121,6 +136,10 @@ fun ImportSheet(app: MotifApp, onDismiss: () -> Unit, onDiscover: () -> Unit) {
     }
 }
 
+/** "Download/Music" for a tree like primary:Download/Music. */
+private fun folderName(tree: Uri): String =
+    DocumentsContract.getTreeDocumentId(tree).substringAfter(':').ifEmpty { "your folder" }
+
 @Composable
 private fun GroupLabel(text: String, modifier: Modifier = Modifier) {
     Text(text.uppercase(), fontSize = 12.sp, color = Motif.secondary, letterSpacing = 0.6.sp, modifier = modifier.padding(start = 4.dp, top = 8.dp))
@@ -164,7 +183,11 @@ private fun ImportJobRow(job: ImportJob) {
         LinearProgressIndicator(
             progress = { progress },
             modifier = Modifier.fillMaxWidth(),
-            color = if (stage is ImportJob.Stage.Done) Motif.done else Motif.accent,
+            color = when (stage) {
+                is ImportJob.Stage.Done -> Motif.done
+                is ImportJob.Stage.Skipped -> Motif.secondary
+                else -> Motif.accent
+            },
             trackColor = Motif.hairline,
             drawStopIndicator = {},
         )
@@ -172,6 +195,7 @@ private fun ImportJobRow(job: ImportJob) {
             ImportJob.Stage.Copying -> "Copying to library…" to Motif.secondary
             is ImportJob.Stage.Analyzing -> "Analyzing tempo and key… ${(stage.progress * 100).toInt()}%" to Motif.secondary
             is ImportJob.Stage.Failed -> stage.message to Color(0xFFFF6B6B)
+            is ImportJob.Stage.Skipped -> stage.reason to Motif.secondary
             is ImportJob.Stage.Done -> listOfNotNull(
                 "Added",
                 stage.track.bpm?.let { "${Math.round(it)} BPM" },

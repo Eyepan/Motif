@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * Generated test audio: a stereo 16-bit / 44.1 kHz FLAC with Vorbis comment
+ * Generated test audio: a stereo 16-bit FLAC (44.1 kHz unless asked) with Vorbis comment
  * tags, so the importer reads real tags and format details and the analyser
  * has a beat to find. Frames are stored VERBATIM (uncompressed), which keeps
  * the writer small while staying a valid FLAC stream.
@@ -17,13 +17,17 @@ object TestAudio {
     const val SAMPLE_RATE = 44_100
     private const val BLOCK = 4096
 
-    fun writeFlac(file: File, title: String, artist: String, album: String, bpm: Double = 120.0, seconds: Double = 8.0) {
-        val frames = (SAMPLE_RATE * seconds).toInt()
-        val samples = beat(frames, bpm)
+    /** [sampleRate] is 44_100, 48_000 or 96_000. */
+    fun writeFlac(
+        file: File, title: String, artist: String, album: String, bpm: Double = 120.0, seconds: Double = 8.0,
+        sampleRate: Int = SAMPLE_RATE,
+    ) {
+        val frames = (sampleRate * seconds).toInt()
+        val samples = beat(frames, bpm, sampleRate)
         val out = ByteArrayOutputStream()
         out.write("fLaC".toByteArray())
         out.write(blockHeader(last = false, type = 0, length = 34))
-        out.write(streamInfo(frames))
+        out.write(streamInfo(frames, sampleRate))
         val tags = vorbisComment(listOf("TITLE=$title", "ARTIST=$artist", "ALBUM=$album"))
         out.write(blockHeader(last = true, type = 4, length = tags.size))
         out.write(tags)
@@ -31,7 +35,7 @@ object TestAudio {
         var index = 0L
         while (start < frames) {
             val n = minOf(BLOCK, frames - start)
-            out.write(frame(index++, samples, start, n))
+            out.write(frame(index++, samples, start, n, sampleRate))
             start += n
         }
         file.parentFile?.mkdirs()
@@ -39,11 +43,11 @@ object TestAudio {
     }
 
     /** A kick-like decaying 60 Hz thump on every beat over a quiet 440 Hz tone. */
-    private fun beat(frames: Int, bpm: Double): ShortArray {
-        val beatLen = SAMPLE_RATE * 60.0 / bpm
+    private fun beat(frames: Int, bpm: Double, sampleRate: Int): ShortArray {
+        val beatLen = sampleRate * 60.0 / bpm
         return ShortArray(frames) { i ->
-            val t = i.toDouble() / SAMPLE_RATE
-            val sinceBeat = (i % beatLen) / SAMPLE_RATE
+            val t = i.toDouble() / sampleRate
+            val sinceBeat = (i % beatLen) / sampleRate
             val kick = sin(2 * PI * 60 * sinceBeat) * exp(-sinceBeat * 18)
             val tone = 0.08 * sin(2 * PI * 440 * t)
             ((kick * 0.7 + tone) * Short.MAX_VALUE).roundToInt().coerceIn(-32768, 32767).toShort()
@@ -55,13 +59,13 @@ object TestAudio {
         (length shr 16).toByte(), (length shr 8).toByte(), length.toByte(),
     )
 
-    private fun streamInfo(totalFrames: Int): ByteArray {
+    private fun streamInfo(totalFrames: Int, sampleRate: Int): ByteArray {
         val b = Bits()
         b.put(BLOCK.toLong(), 16) // min block size
         b.put(BLOCK.toLong(), 16) // max block size
         b.put(0, 24) // min frame size: unknown
         b.put(0, 24) // max frame size: unknown
-        b.put(SAMPLE_RATE.toLong(), 20)
+        b.put(sampleRate.toLong(), 20)
         b.put(2 - 1L, 3) // channels - 1
         b.put(16 - 1L, 5) // bits per sample - 1
         b.put(totalFrames.toLong(), 36)
@@ -84,13 +88,13 @@ object TestAudio {
         return out.toByteArray()
     }
 
-    private fun frame(index: Long, samples: ShortArray, start: Int, n: Int): ByteArray {
+    private fun frame(index: Long, samples: ShortArray, start: Int, n: Int, sampleRate: Int): ByteArray {
         val h = Bits()
         h.put(0b11111111111110, 14) // sync
         h.put(0, 1) // reserved
         h.put(0, 1) // fixed block size
         h.put(0b0111, 4) // block size: 16-bit (n - 1) after the header
-        h.put(0b1001, 4) // 44.1 kHz
+        h.put(when (sampleRate) { 48_000 -> 0b1010L; 96_000 -> 0b1011L; else -> 0b1001L }, 4) // 44.1 kHz unless asked
         h.put(0b0001, 4) // left, right
         h.put(0b100, 3) // 16 bits per sample
         h.put(0, 1) // reserved

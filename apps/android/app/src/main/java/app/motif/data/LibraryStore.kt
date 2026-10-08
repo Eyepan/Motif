@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,7 +53,13 @@ class LibraryStore(private val context: Context) {
     suspend fun load() = withContext(Dispatchers.IO) {
         recleanIfNeeded()
         refresh()
+        loaded.complete(Unit)
     }
+
+    private val loaded = CompletableDeferred<Unit>()
+
+    /** Returns once [load] has published the library, so [tracks] holds every track. */
+    suspend fun awaitLoaded() = loaded.await()
 
     /** Inserts a track and the raw tags its cleaned values came from. */
     suspend fun insert(track: Track, raw: RawTags? = null) = withContext(Dispatchers.IO) {
@@ -146,6 +153,20 @@ class LibraryStore(private val context: Context) {
             helper.writableDatabase.update("tracks", values, "id = ?", arrayOf(id))
             refresh()
         }
+
+    /** Points a track at a new audio file (a better copy of the same recording) and records its format. */
+    suspend fun replaceFile(track: Track) = withContext(Dispatchers.IO) {
+        val values = ContentValues().apply {
+            put("file_path", track.filePath)
+            put("format", track.format)
+            put("sample_rate", track.sampleRate)
+            put("bit_depth", track.bitDepth)
+            put("channels", track.channels)
+            put("duration_ms", track.durationMs)
+        }
+        helper.writableDatabase.update("tracks", values, "id = ?", arrayOf(track.id))
+        refresh()
+    }
 
     suspend fun delete(track: Track) = withContext(Dispatchers.IO) {
         helper.writableDatabase.delete("tracks", "id = ?", arrayOf(track.id))

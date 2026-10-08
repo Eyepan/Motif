@@ -61,4 +61,14 @@ object MotifDsp {
     @JvmStatic external fun metaCleanField(text: String, suffixes: Array<String>): String
     /** [name, role, name, role, ...]; [known] holds names already passed through [metaNorm]. */
     @JvmStatic external fun metaSplitArtists(credit: String, known: Array<String>): Array<String>?
+
+    // Import dedupe (core/dsp/src/dedupe.rs). Use through importer.Dedupe.
+    @JvmStatic external fun dedupeKey(title: String, artist: String?): String
+    /**
+     * Track 0 against tracks 1..: [verdict (0 new, 1 duplicate, 2 upgrade), index among tracks 1..].
+     * [numbers] holds four per track: duration ms, sample rate, bit depth, kbps (0 = unknown).
+     */
+    @JvmStatic external fun dedupeResolve(titles: Array<String?>, artists: Array<String?>, formats: Array<String?>, numbers: LongArray): IntArray?
+    /** Indexes best copy first; [numbers] as in [dedupeResolve]. */
+    @JvmStatic external fun dedupeBestFirst(formats: Array<String?>, numbers: LongArray): IntArray?
 }

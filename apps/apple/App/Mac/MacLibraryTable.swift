@@ -108,7 +108,17 @@ struct MacLibraryTable: View {
                 }
             }
             ToolbarItem {
-                Button("Import…") { importing = true }
+                Menu {
+                    Toggle("Read from Downloads", isOn: Binding(
+                        get: { model.readFromDownloads },
+                        set: { model.readFromDownloads = $0 }
+                    ))
+                } label: {
+                    Text("Import…")
+                } primaryAction: {
+                    importing = true
+                }
+                .help("Import files, or keep importing music that lands in Downloads")
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio, .folder], allowsMultipleSelection: true) { result in

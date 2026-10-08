@@ -50,6 +50,44 @@ char *motif_meta_clean_field(const char *text, const char *const *suffixes, size
 // `known` holds names already passed through motif_meta_norm.
 char *motif_meta_split_artists(const char *credit, const char *const *known, size_t count);
 
+// Import dedupe (core/dsp/src/dedupe.rs). Strings as above; artist may be NULL,
+// unknown numbers are 0. format is the library's format name ("flac", "mp3"...).
+typedef struct {
+    const char *title;
+    const char *artist;
+    int64_t duration_ms;
+    const char *format;
+    uint32_t sample_rate;
+    uint32_t bit_depth;
+    uint32_t bitrate_kbps;  // ranks lossy copies only
+} MotifDedupeTrack;
+
+typedef enum {
+    MOTIF_DEDUPE_NEW = 0,        // no copy yet: import it
+    MOTIF_DEDUPE_DUPLICATE = 1,  // existing[*out_index] is as good or better: skip
+    MOTIF_DEDUPE_UPGRADE = 2,    // existing[*out_index] is worse: replace its file
+} MotifDedupeVerdict;
+
+// Lead artist and title, normalized; equal keys are the same song. NULL for a NULL title.
+char *motif_dedupe_key(const char *title, const char *artist);
+// 1 when a is the better copy, -1 when b is, 0 when equal.
+int32_t motif_dedupe_compare_quality(const MotifDedupeTrack *a, const MotifDedupeTrack *b);
+// A MotifDedupeVerdict for incoming against count existing tracks, or -1 on a NULL argument.
+int32_t motif_dedupe_resolve(const MotifDedupeTrack *incoming, const MotifDedupeTrack *existing,
+                             size_t count, size_t *out_index);
+
+// Zip archives (core/dsp/src/archive.rs), read one entry at a time. Listed
+// names are relative, '/'-separated and safe to join onto a folder; hidden
+// files, __MACOSX and directories are left out.
+typedef struct MotifZip MotifZip;
+MotifZip *motif_zip_open(const char *path);  // NULL if not a readable zip
+size_t motif_zip_count(const MotifZip *zip);
+char *motif_zip_name(const MotifZip *zip, size_t index);  // free with motif_string_free
+uint64_t motif_zip_size(const MotifZip *zip, size_t index);
+// Writes the entry to dest. -1 on failure or when it holds more than max_bytes (dest is removed).
+int32_t motif_zip_extract(MotifZip *zip, size_t index, const char *dest, uint64_t max_bytes);
+void motif_zip_free(MotifZip *zip);
+
 // Beat-aligned mixing (core/dsp/src/mix.rs). Positions and lengths in seconds.
 typedef struct {
     double bpm;             // 0 if unknown

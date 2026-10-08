@@ -9,7 +9,7 @@ struct ImportJob: Identifiable {
 
     var isFinished: Bool {
         switch stage {
-        case .done, .failed: true
+        case .done, .skipped, .failed: true
         case .copying, .analyzing: false
         }
     }
@@ -39,6 +39,7 @@ final class AppModel {
     let store: LibraryStore
     let player: PlaybackEngine
     let importer: ImportService
+    let folderImporter: FolderImporter
     let sources: [any MusicSource]
 
     private(set) var tracks: [Track] = [] {
@@ -67,10 +68,17 @@ final class AppModel {
         self.store = store
         player = PlaybackEngine(store: store)
         importer = ImportService(store: store)
+        folderImporter = FolderImporter(importer: importer, store: store,
+                                        stateFile: store.mediaDirectory.deletingLastPathComponent().appending(path: "folder-import.json"))
         let jamendo = JamendoSource()
         sources = [InternetArchiveSource()] + (jamendo.isConfigured ? [jamendo] : [])
         analyzeOnImport = UserDefaults.standard.object(forKey: "analyzeOnImport") as? Bool ?? true
         player.mixIntoNext = UserDefaults.standard.bool(forKey: "mixIntoNext")
+        #if os(macOS)
+        readFromDownloads = UserDefaults.standard.bool(forKey: "readFromDownloads")
+        #else
+        watchedFolder = Self.resolveWatchedFolder()
+        #endif
     }
 
     func setMixIntoNext(_ on: Bool) {
@@ -181,6 +189,98 @@ final class AppModel {
             importJobs.append(ImportJob(id: event.jobID, fileName: event.fileName, stage: event.stage))
         }
         if case .done = event.stage { Task { await refresh() } }
+    }
+
+    // MARK: - Read from Downloads
+
+    #if os(macOS)
+    /// Watches ~/Downloads and imports music that lands there (files, album folders, .zip archives).
+    var readFromDownloads: Bool {
+        didSet {
+            UserDefaults.standard.set(readFromDownloads, forKey: "readFromDownloads")
+            startWatchingFolder()
+        }
+    }
+    private var watcher: FolderWatcher?
+
+    var watchedFolder: URL? { readFromDownloads ? FolderImporter.downloadsFolder : nil }
+    #else
+    /// A folder the user picked (iOS can't watch Downloads in the background); rescanned on launch and on return to the app.
+    private(set) var watchedFolder: URL?
+
+    func watch(_ folder: URL) {
+        let scoped = folder.startAccessingSecurityScopedResource()
+        defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
+        do {
+            UserDefaults.standard.set(try folder.bookmarkData(), forKey: "watchedFolderBookmark")
+            watchedFolder = folder
+            Task { await scanWatchedFolder() }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func stopWatchingFolder() {
+        UserDefaults.standard.removeObject(forKey: "watchedFolderBookmark")
+        watchedFolder = nil
+    }
+
+    private static func resolveWatchedFolder() -> URL? {
+        guard let data = UserDefaults.standard.data(forKey: "watchedFolderBookmark") else { return nil }
+        var stale = false
+        guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) else { return nil }
+        if stale, url.startAccessingSecurityScopedResource() {
+            defer { url.stopAccessingSecurityScopedResource() }
+            if let fresh = try? url.bookmarkData() { UserDefaults.standard.set(fresh, forKey: "watchedFolderBookmark") }
+        }
+        return url
+    }
+    #endif
+
+    private var folderScanRunning = false
+    private var folderScanAgain = false
+    private var pendingFolderScan: Task<Void, Never>?
+
+    /// Scans now and, on the Mac, whenever something lands in Downloads.
+    func startWatchingFolder() {
+        #if os(macOS)
+        // The model lives as long as the app; turning the setting off drops the watcher.
+        watcher = watchedFolder.flatMap { folder in
+            FolderWatcher(folder) {
+                Task { @MainActor in self.scheduleFolderScan(after: 3) }
+            }
+        }
+        #endif
+        Task { await scanWatchedFolder() }
+    }
+
+    /// Imports what's new in the watched folder. Calls while a scan runs fold into one more pass.
+    func scanWatchedFolder() async {
+        guard let folder = watchedFolder else { return }
+        if folderScanRunning {
+            folderScanAgain = true
+            return
+        }
+        folderScanRunning = true
+        defer { folderScanRunning = false }
+        repeat {
+            folderScanAgain = false
+            let report = await folderImporter.scan(folder, analyze: analyzeOnImport) { event in
+                await MainActor.run { self.apply(event) }
+            }
+            // Something was still downloading; look again once it has settled.
+            if report.waiting { scheduleFolderScan(after: FolderImporter.settleTime + 2) }
+        } while folderScanAgain
+        await refresh()
+    }
+
+    private func scheduleFolderScan(after seconds: Double) {
+        pendingFolderScan?.cancel()
+        pendingFolderScan = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            await scanWatchedFolder()
+        }
     }
 
     /// Analyzes tracks imported before analysis existed, or with it switched off.

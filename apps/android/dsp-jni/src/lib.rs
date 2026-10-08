@@ -2,11 +2,12 @@
 //! with the `external fun` declarations there. Analyzer handles are boxed
 //! `Analyzer`s passed to Kotlin as `Long`.
 
-use jni::objects::{JClass, JDoubleArray, JFloatArray, JObject, JObjectArray, JString};
-use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jfloatArray, jint, jlong, jobjectArray, jstring, JNI_TRUE};
+use jni::objects::{JClass, JDoubleArray, JFloatArray, JLongArray, JObject, JObjectArray, JString};
+use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jfloatArray, jint, jintArray, jlong, jobjectArray, jstring, JNI_TRUE};
 use jni::JNIEnv;
 use motif_dsp::analysis::Analyzer;
 use motif_dsp::crossfade::{self, Curve};
+use motif_dsp::dedupe::{self, Candidate, Verdict};
 use motif_dsp::meta;
 use motif_dsp::mix::{self, Action, Plan, Timing};
 use motif_dsp::{deck_sync, MotifTiming};
@@ -270,4 +271,95 @@ pub extern "system" fn Java_app_motif_dsp_MotifDsp_metaSplitArtists(
     let credits = meta::split_artists(&credit, &known);
     let flat: Vec<&str> = credits.iter().flat_map(|c| [c.name.as_str(), c.role.as_str()]).collect();
     new_strings(&mut env, &flat)
+}
+
+// MARK: - Import dedupe (motif_dsp::dedupe)
+
+fn int_array(env: &mut JNIEnv, values: &[i32]) -> jintArray {
+    let Ok(array) = env.new_int_array(values.len() as i32) else { return std::ptr::null_mut() };
+    if env.set_int_array_region(&array, 0, values).is_err() {
+        return std::ptr::null_mut();
+    }
+    array.into_raw()
+}
+
+/// Tracks passed as parallel arrays: strings per track, and four numbers per
+/// track in `numbers` ([duration ms, sample rate, bit depth, kbps], 0 = unknown).
+struct Tracks {
+    titles: Vec<Option<String>>,
+    artists: Vec<Option<String>>,
+    formats: Vec<Option<String>>,
+    numbers: Vec<i64>,
+}
+
+impl Tracks {
+    fn read(env: &mut JNIEnv, titles: &JObjectArray, artists: &JObjectArray, formats: &JObjectArray, numbers: &JLongArray) -> Option<Tracks> {
+        let formats = read_strings(env, formats);
+        let len = env.get_array_length(numbers).ok()? as usize;
+        if len != formats.len() * 4 {
+            return None;
+        }
+        let mut values = vec![0i64; len];
+        env.get_long_array_region(numbers, 0, &mut values).ok()?;
+        Some(Tracks { titles: read_strings(env, titles), artists: read_strings(env, artists), formats, numbers: values })
+    }
+
+    fn candidates(&self) -> Vec<Candidate<'_>> {
+        let number = |i: usize, k: usize| self.numbers[i * 4 + k].clamp(0, u32::MAX as i64) as u32;
+        (0..self.formats.len())
+            .map(|i| Candidate {
+                title: self.titles.get(i).and_then(|t| t.as_deref()).unwrap_or(""),
+                artist: self.artists.get(i).and_then(|a| a.as_deref()),
+                duration_ms: self.numbers[i * 4],
+                format: self.formats[i].as_deref().unwrap_or(""),
+                sample_rate: number(i, 1),
+                bit_depth: number(i, 2),
+                bitrate_kbps: number(i, 3),
+            })
+            .collect()
+    }
+}
+
+/// Lead artist and title, normalized; equal keys are the same song.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_dedupeKey(mut env: JNIEnv, _class: JClass, title: JString, artist: JString) -> jstring {
+    let title = read_string(&mut env, &title).unwrap_or_default();
+    let artist = read_string(&mut env, &artist);
+    new_string(&mut env, &dedupe::match_key(&title, artist.as_deref()))
+}
+
+/// [verdict (0 new, 1 duplicate, 2 upgrade), index into the existing tracks]
+/// for track 0 against tracks 1..; null on malformed arrays.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_dedupeResolve(
+    mut env: JNIEnv,
+    _class: JClass,
+    titles: JObjectArray,
+    artists: JObjectArray,
+    formats: JObjectArray,
+    numbers: JLongArray,
+) -> jintArray {
+    let Some(tracks) = Tracks::read(&mut env, &titles, &artists, &formats, &numbers) else { return std::ptr::null_mut() };
+    let all = tracks.candidates();
+    let Some((incoming, existing)) = all.split_first() else { return std::ptr::null_mut() };
+    let (verdict, index) = match dedupe::resolve(incoming, existing) {
+        Verdict::New => (0, 0),
+        Verdict::Duplicate(i) => (1, i),
+        Verdict::Upgrade(i) => (2, i),
+    };
+    int_array(&mut env, &[verdict, index as i32])
+}
+
+/// Indexes of the tracks, best copy first.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_dedupeBestFirst(
+    mut env: JNIEnv,
+    _class: JClass,
+    formats: JObjectArray,
+    numbers: JLongArray,
+) -> jintArray {
+    let null = JObjectArray::from(JObject::null());
+    let Some(tracks) = Tracks::read(&mut env, &null, &null, &formats, &numbers) else { return std::ptr::null_mut() };
+    let order: Vec<i32> = dedupe::best_first(&tracks.candidates()).into_iter().map(|i| i as i32).collect();
+    int_array(&mut env, &order)
 }

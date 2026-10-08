@@ -30,6 +30,8 @@ class ImportJob(val id: String, val fileName: String, val stage: Stage) {
         data object Copying : Stage
         data class Analyzing(val progress: Float) : Stage
         data class Done(val track: Track) : Stage
+        /** Not imported, for [reason] (a copy at equal or better quality is in the library). */
+        data class Skipped(val reason: String) : Stage
         data class Failed(val message: String) : Stage
     }
 }
@@ -123,12 +125,67 @@ class Importer(
         val job = ImportJob(UUID.randomUUID().toString(), fileName, ImportJob.Stage.Copying)
         _jobs.update { it + job }
         return queue.withLock {
-            add(job, info, cover) { dest ->
-                if (!file.renameTo(dest)) {
-                    file.copyTo(dest, overwrite = true)
-                    file.delete()
-                }
+            add(job, info, cover) { dest -> moveInto(file, dest) }
+        }
+    }
+
+    /**
+     * The track a file in the app's own storage would become, without adding it:
+     * tags cleaned, format read. Throws for files that aren't readable audio.
+     */
+    fun probe(file: File, fileName: String): Track = readTrack(UUID.randomUUID().toString(), file, fileName, null).first
+
+    /** Adds a file from the app's own storage (moved, not copied), like a picked file. */
+    suspend fun importStaged(file: File, fileName: String, cover: ByteArray?): Track {
+        val job = ImportJob(UUID.randomUUID().toString(), fileName, ImportJob.Stage.Copying)
+        _jobs.update { it + job }
+        return queue.withLock { add(job, null, cover) { dest -> moveInto(file, dest) } }
+    }
+
+    /**
+     * Swaps [existing]'s audio for [file], a better copy of the same recording
+     * ([probed] is what [probe] read from it). The track keeps its id, tags,
+     * analysis and history; only the file and its format change.
+     */
+    suspend fun replaceFile(existing: Track, file: File, fileName: String, probed: Track, cover: ByteArray?): Track {
+        val job = ImportJob(UUID.randomUUID().toString(), fileName, ImportJob.Stage.Copying)
+        _jobs.update { it + job }
+        return queue.withLock {
+            val ext = fileName.substringAfterLast('.', "").lowercase()
+            val dest = File(store.mediaDir, if (ext.isEmpty()) UUID.randomUUID().toString() else "${UUID.randomUUID()}.$ext")
+            try {
+                moveInto(file, dest)
+                val track = existing.copy(
+                    filePath = dest.name, format = probed.format, sampleRate = probed.sampleRate,
+                    bitDepth = probed.bitDepth, channels = probed.channels, durationMs = probed.durationMs,
+                )
+                store.replaceFile(track)
+                store.fileFor(existing).delete()
+                if (!artwork.fileFor(existing.id).exists()) artwork.extract(existing.id, dest, fallback = cover)
+                setStage(job.id, ImportJob.Stage.Done(track))
+                track
+            } catch (e: Exception) {
+                dest.delete()
+                setStage(job.id, ImportJob.Stage.Failed(e.message ?: "Import failed"))
+                throw e
             }
+        }
+    }
+
+    /** Lists a file that wasn't imported, with why. */
+    fun skipped(fileName: String, reason: String) {
+        _jobs.update { it + ImportJob(UUID.randomUUID().toString(), fileName, ImportJob.Stage.Skipped(reason)) }
+    }
+
+    /** Lists a file that couldn't be read at all. */
+    fun failed(fileName: String, message: String) {
+        _jobs.update { it + ImportJob(UUID.randomUUID().toString(), fileName, ImportJob.Stage.Failed(message)) }
+    }
+
+    private fun moveInto(file: File, dest: File) {
+        if (!file.renameTo(dest)) {
+            file.copyTo(dest, overwrite = true)
+            file.delete()
         }
     }
 
