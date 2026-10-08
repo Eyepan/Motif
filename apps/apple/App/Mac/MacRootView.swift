@@ -23,6 +23,7 @@ struct MacRootView: View {
     @State private var selection: SidebarItem? = .songs
 
     var body: some View {
+        @Bindable var model = model
         NavigationSplitView {
             List(selection: $selection) {
                 Section("Library") {
@@ -83,6 +84,7 @@ struct MacRootView: View {
         }
         .background(Theme.macGround)
         .crateNamePrompt()
+        .sheet(isPresented: $model.account.showWelcome) { MacWelcomeView() }
     }
 }
 #endif

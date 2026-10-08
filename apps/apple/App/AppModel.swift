@@ -42,6 +42,7 @@ final class AppModel {
     let importer: ImportService
     let folderImporter: FolderImporter
     let sources: [any MusicSource]
+    let account: AccountModel
 
     private(set) var tracks: [Track] = [] {
         didSet {
@@ -65,6 +66,7 @@ final class AppModel {
     var phoneTab: PhoneTab = .library
     var showImport = false
     var showNowPlaying = false
+    var showSettings = false
     /// A crate being created or renamed; the root view shows the name prompt while set.
     var crateNaming: CrateNaming?
 
@@ -75,6 +77,7 @@ final class AppModel {
     init(store: LibraryStore, history: HistoryStore) {
         self.store = store
         crateStore = CrateStore(history: history, library: store)
+        account = AccountModel(history: history)
         player = PlaybackEngine(store: store)
         importer = ImportService(store: store)
         folderImporter = FolderImporter(importer: importer, store: store,
@@ -186,6 +189,11 @@ final class AppModel {
     /// The crate's tracks that are on this device, in crate order.
     func tracks(in crate: Crate) -> [Track] {
         crate.trackKeys.compactMap { tracksByKey[$0] }
+    }
+
+    /// The library track with this content hash, for history rows from any device.
+    func track(forKey key: String?) -> Track? {
+        key.flatMap { tracksByKey[$0] }
     }
 
     /// Tracks in the crate that were added on another device and aren't imported here.

@@ -127,15 +127,17 @@ The API is about fifteen small JSON endpoints. The hard parts of the client are 
 
 | | Apple (MotifKit) | Android |
 | --- | --- | --- |
-| Sign-in | Username and password form; offer to save it with Password AutoFill | Username and password form; Credential Manager saves the password |
-| Tokens | Keychain, `kSecAttrAccessibleAfterFirstUnlock` so background sync can read them | DataStore encrypted with an Android Keystore key |
-| HTTP | `URLSession` + `Codable` | OkHttp or Ktor + kotlinx.serialization |
-| Background upload | `BGAppRefreshTask`, plus on launch and network change | WorkManager with a network constraint |
-| Sync state | `sync_state` table in `history.db` holding the pull cursor | same |
+| Sign-in | Username and password form with Password AutoFill content types | Username and password form |
+| Tokens | Refresh token in the Keychain (`KeychainTokenStore`); access token in memory | Refresh token in shared preferences, encrypted with an Android Keystore AES key (`KeystoreTokenStore`) |
+| HTTP | `URLSession` + `Codable` (`MotifAPI`) | `HttpURLConnection` + `org.json` (`MotifApi`) |
+| When it syncs | Launch, coming to the foreground, after sign-in, and Sync now | Launch, coming to the foreground, after sign-in, and Sync now |
+| Sync state | `sync_state` table in `history.sqlite`: pull cursor, last sync, account id | same |
+
+Background sync (`BGAppRefreshTask`, WorkManager) is not built yet.
 
 What stays shared is the contract and the data: `schemas/api/openapi.yaml`, the event schemas in `schemas/events/`, and JSON fixtures both clients' tests decode. Generating Swift and Kotlin types from the OpenAPI file is possible later; for this many endpoints hand-written `Codable` and `@Serializable` types are smaller.
 
-The sync loop on each device: upload unsynced rows in batches of up to 1,000 and mark acknowledged ones synced; then pull from the stored cursor until `has_more` is false, inserting pulled events into `history.db` (duplicates ignored); save the cursor. On a 401, refresh once and retry; if the refresh fails, keep everything local and show "signed out" in Settings.
+The sync loop on each device: upload unsynced rows in batches of up to 1,000 and mark acknowledged ones synced; then pull from the stored cursor until `has_more` is false, inserting pulled events into `history.db` (duplicates ignored); save the cursor. On a 401, refresh once and retry; if the refresh fails, keep everything local and show "signed out" in Settings. Events the server rejects are marked `synced = 2` and never retried. Signing in as a different account resets every row to unsynced and the cursor to the start. A pulled `history_deleted` event deletes the same range and types locally.
 
 ## Decisions (Pan, 2026-10-07)
 

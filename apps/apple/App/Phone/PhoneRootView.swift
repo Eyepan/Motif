@@ -30,6 +30,8 @@ struct PhoneRootView: View {
         }
         .sheet(isPresented: $model.showImport) { ImportSheet() }
         .fullScreenCover(isPresented: $model.showNowPlaying) { NowPlayingView() }
+        .sheet(isPresented: $model.showSettings) { PhoneSettingsView() }
+        .fullScreenCover(isPresented: $model.account.showWelcome) { PhoneWelcomeView() }
         .crateNamePrompt()
     }
 }

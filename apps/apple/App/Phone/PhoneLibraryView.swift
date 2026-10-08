@@ -115,6 +115,10 @@ struct PhoneLibraryView: View {
         .crateDestination()
         .searchable(text: $query, prompt: "Songs, artists, BPM, key")
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button { model.showSettings = true } label: { Image(systemName: "person.crop.circle") }
+                    .accessibilityLabel("Settings and account")
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { model.phoneTab = .mix } label: { Image(systemName: "dial.medium") }
                     .accessibilityLabel("Open DJ mix")

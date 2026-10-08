@@ -1,5 +1,6 @@
 package app.motif.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +11,7 @@ import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.ViewAgenda
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -17,6 +19,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +53,14 @@ fun MotifRoot(app: MotifApp) {
     val tracks by app.library.tracks.collectAsStateWithLifecycle()
     val player by app.playback.state.collectAsStateWithLifecycle()
     val crates by app.crates.crates.collectAsStateWithLifecycle()
+    val showWelcome by app.account.showWelcome.collectAsStateWithLifecycle()
+    val accountError by app.account.errors.collectAsStateWithLifecycle()
+    var settingsPages by remember { mutableStateOf(emptyList<SettingsPage>()) }
+
+    if (showWelcome) {
+        WelcomeScreen(app)
+        return
+    }
 
     Scaffold(
         containerColor = Motif.ground,
@@ -90,6 +101,7 @@ fun MotifRoot(app: MotifApp) {
                 crates = crates,
                 onAddToCrate = { addToCrate = listOf(it) },
                 onOpenCrate = { openCrate = it.id; tab = Tab.Crates },
+                onOpenSettings = { settingsPages = listOf(SettingsPage.Settings) },
                 modifier = modifier,
             )
             Tab.Crates -> CratesScreen(app, tracks, player.current, openCrate, onOpen = { openCrate = it }, modifier = modifier)
@@ -110,5 +122,17 @@ fun MotifRoot(app: MotifApp) {
     addToCrate?.let { picked -> CratePicker(app, picked, onDismiss = { addToCrate = null }) }
     if (showImport) {
         ImportSheet(app, onDismiss = { showImport = false }, onDiscover = { showImport = false; tab = Tab.Discover })
+    }
+    // Settings, account, history and server details draw over the tabs.
+    if (settingsPages.isNotEmpty()) {
+        Box(Modifier.fillMaxSize()) { SettingsScreens(app, settingsPages, onNavigate = { settingsPages = it }) }
+    }
+    accountError?.let { message ->
+        AlertDialog(
+            onDismissRequest = app.account::clearError,
+            confirmButton = { TextButton(onClick = app.account::clearError) { Text("OK", color = Motif.accent) } },
+            text = { Text(message) },
+            containerColor = Motif.raised,
+        )
     }
 }

@@ -40,4 +40,7 @@ targets:
       path: App/Info.plist
       properties:
         UIBackgroundModes: [audio]
+        # A server on localhost or the LAN for development (Settings > Server); everything else is https.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         JAMENDO_CLIENT_ID: ""
