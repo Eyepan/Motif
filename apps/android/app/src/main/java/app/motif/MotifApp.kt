@@ -7,6 +7,7 @@ import app.motif.data.LibraryStore
 import app.motif.data.Track
 import app.motif.dsp.MotifDsp
 import app.motif.importer.Downloads
+import app.motif.importer.FolderImporter
 import app.motif.importer.Importer
 import app.motif.playback.DjEngine
 import app.motif.playback.PlaybackEngine
@@ -70,6 +71,9 @@ class MotifApp : Application() {
     }
 
     val downloads by lazy { Downloads(cacheDir, importer, scope) }
+
+    /** Read from Downloads: a picked folder whose new music is imported on every launch. */
+    val folderImporter by lazy { FolderImporter(this, importer, library, prefs, scope) }
 
     val previewer by lazy { Previewer(this) }
 

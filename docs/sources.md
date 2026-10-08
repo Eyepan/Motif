@@ -13,6 +13,18 @@ Motif downloads only audio the user is allowed to keep, and prefers lossless for
 | YouTube Music | No | Not supported | No lossless audio, and downloading from it violates its terms of service. |
 | MassTamilan and similar film-music sites | — | Not supported | They redistribute label releases (Think Music, Sony, Saregama and others) without a license from the labels. |
 
+## Read from Downloads
+
+Motif imports the music that lands in a folder, whichever site or app put it there. It never downloads anything or contacts any site; it only reads local files.
+
+- **What it reads**: audio files (FLAC, WAV, AIFF, ALAC, MP3 and the rest Motif plays), album folders up to three levels deep, and .zip archives of audio. Archives are unpacked one track at a time into the app's temporary folder, so a hostile archive can't write outside it or fill the disk (each track is capped at 4 GB). Hidden files, `__MACOSX` folders and in-progress downloads (`.crdownload`, `.part`, Safari's `.download` folders) are skipped, and anything modified in the last 10 seconds waits for the next pass.
+- **Duplicates**: every file is checked against the library with the shared rules in `core/dsp/src/dedupe.rs`. Two files are the same recording when their lead artist and title match (ignoring case, punctuation, track numbers, "feat." credits and markers like "(320kbps)") and their durations agree within 2 seconds or 1%. Lossless beats lossy; lossless copies then rank by sample rate and bit depth, lossy ones by bitrate. A file no better than the library's copy is skipped; a better one replaces the library's file in place, so the track keeps its tags, edits, analysis and play history. Within one download the best copy is imported first.
+- **Once per file**: each file or archive is read once, keyed by path, size and modification time, so a re-downloaded file is read again but a launch doesn't re-import anything.
+- **Mac**: Import › Read from Downloads watches `~/Downloads` (the app has read-only access to it) and reads new arrivals a few seconds after they land.
+- **iPhone and iPad**: iOS doesn't let apps watch Downloads in the background. Add Music › Read from Downloads asks for a folder (Downloads in Files, or any other) and reads it every time Motif opens or comes back to the foreground.
+- **Android**: Add Music › Read from Downloads asks for a folder through the system picker and reads it every time Motif opens. Android 11 and later don't let apps pick the Download folder itself, so pick a folder inside it (for example `Download/Music`) and save or move albums there.
+- On Android, archives are read with `java.util.zip`; the Apple apps use the core's reader (`core/dsp/src/archive.rs`), since iOS has no public unzip API.
+
 ## Discover
 
 Discover searches every catalog at once (or one, picked at the top); a catalog that can't be reached is named without hiding the others' results. A search that finds nothing says so, and links to Qobuz and Bandcamp searches for the same words, since most label releases are only sold there. Discover searches a catalog, previews a result by streaming it, and downloads it with one tap straight into the library. On Android, downloaded files go through the same import as local files (bit-perfect copy, tags, on-device analysis); the catalog's title, artist and album fill any tag the file lacks, and the catalog's cover becomes the track's art. Downloads run in the app process two at a time and show in Add Music as well as on the result.

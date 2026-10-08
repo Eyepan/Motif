@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct MotifApp: App {
     @State private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         do {
@@ -27,8 +28,13 @@ struct MotifApp: App {
             .preferredColorScheme(.dark)
             .task {
                 await model.load()
+                model.startWatchingFolder()
                 await model.backfillArtwork()
                 await model.analyzeMissing()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // iOS can't watch a folder in the background; catch up on what arrived meanwhile.
+                if phase == .active { Task { await model.scanWatchedFolder() } }
             }
             .alert("Something went wrong", isPresented: Binding(
                 get: { model.errorMessage != nil },

@@ -33,6 +33,8 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
         ENABLE_USER_SELECTED_FILES: readonly
+        # Read from Downloads on the Mac (FolderImporter). Read-only: archives unpack into the app's temp folder.
+        ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER: readonly
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
     info:
       path: App/Info.plist

@@ -6,6 +6,8 @@ public struct ImportEvent: Sendable {
         case copying
         case analyzing
         case done(Track)
+        /// Not imported, for the reason given (a copy at equal or better quality is in the library).
+        case skipped(String)
         case failed(String)
     }
 
@@ -116,44 +118,105 @@ public struct ImportService: Sendable {
     /// `cover`), and records it with the raw tags it was cleaned from.
     private func ingest(copyFrom file: URL, source: Track.Source, sourceRef: String?, licenseURL: URL?,
                         fallbackTitle: String?, cover: Data?) async throws -> Track {
-        let ext = file.pathExtension.lowercased()
-        let relative = "\(UUID().uuidString).\(ext)"
-        let destination = store.mediaDirectory.appending(path: relative)
-        try FileManager.default.copyItem(at: file, to: destination)
+        let probe = try await self.probe(file, source: source, sourceRef: sourceRef, licenseURL: licenseURL,
+                                         fallbackTitle: fallbackTitle)
+        return try await add(probe, cover: cover)
+    }
 
-        let id = UUID()
+    /// A file read in place: the track it would become, before anything is copied.
+    public struct Probe: Sendable {
+        public let file: URL
+        /// `filePath` is empty until the file is added.
+        public let track: Track
+        let raw: RawTags
+        public let fileBytes: Int
+
+        /// What duplicate detection compares.
+        public var copy: Dedupe.Copy {
+            var copy = Dedupe.Copy(track)
+            if !track.isLossless { copy.bitrateKbps = Dedupe.bitrateKbps(bytes: fileBytes, durationMs: track.durationMs) }
+            return copy
+        }
+    }
+
+    /// Reads tags and format without copying. Throws for files AVFoundation can't read.
+    public func probe(_ file: URL, source: Track.Source = .local, sourceRef: String? = nil, licenseURL: URL? = nil,
+                      fallbackTitle: String? = nil) async throws -> Probe {
+        let ext = file.pathExtension.lowercased()
+        let raw = await Self.tags(of: file)
+        let audio = try AVAudioFile(forReading: file)
+        let format = audio.fileFormat
+        var suffixes = await store.siteSuffixes
+        if let suffix = TagCleaner.siteSuffix(raw) { suffixes.insert(suffix) }
+        let albumArtist = TagCleaner.clean(raw.albumArtist, suffixes: suffixes)
+        let track = Track(
+            title: TagCleaner.clean(raw.title, suffixes: suffixes) ?? fallbackTitle ?? file.deletingPathExtension().lastPathComponent,
+            artist: TagCleaner.clean(raw.artist, suffixes: suffixes) ?? albumArtist,
+            album: TagCleaner.clean(raw.album, suffixes: suffixes),
+            durationMs: Int(Double(audio.length) / format.sampleRate * 1000),
+            filePath: "",
+            format: Self.formatName(ext, codec: format.streamDescription.pointee.mFormatID),
+            sampleRate: Int(format.sampleRate),
+            bitDepth: Self.bitDepth(of: format),
+            channels: Int(format.channelCount),
+            source: source,
+            sourceRef: sourceRef,
+            licenseURL: licenseURL,
+            albumArtist: albumArtist
+        )
+        let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        return Probe(file: file, track: track, raw: raw, fileBytes: bytes)
+    }
+
+    /// Copies a probed file into the library and records it, with its art
+    /// (embedded, else `cover`) and the raw tags its values were cleaned from.
+    public func add(_ probe: Probe, cover: Data?) async throws -> Track {
+        var track = probe.track
+        track.filePath = try copyIntoLibrary(probe.file)
+        let destination = store.mediaDirectory.appending(path: track.filePath)
         do {
-            let raw = await Self.tags(of: destination)
-            let audio = try AVAudioFile(forReading: destination)
-            let format = audio.fileFormat
-            var suffixes = await store.siteSuffixes
-            if let suffix = TagCleaner.siteSuffix(raw) { suffixes.insert(suffix) }
-            let albumArtist = TagCleaner.clean(raw.albumArtist, suffixes: suffixes)
-            let track = Track(
-                id: id,
-                title: TagCleaner.clean(raw.title, suffixes: suffixes) ?? fallbackTitle ?? file.deletingPathExtension().lastPathComponent,
-                artist: TagCleaner.clean(raw.artist, suffixes: suffixes) ?? albumArtist,
-                album: TagCleaner.clean(raw.album, suffixes: suffixes),
-                durationMs: Int(Double(audio.length) / format.sampleRate * 1000),
-                filePath: relative,
-                format: Self.formatName(ext),
-                sampleRate: Int(format.sampleRate),
-                bitDepth: Self.bitDepth(of: format),
-                channels: Int(format.channelCount),
-                source: source,
-                sourceRef: sourceRef,
-                licenseURL: licenseURL,
-                albumArtist: albumArtist
-            )
             // Art first, so the row shows it as soon as the track appears.
-            await store.artwork.extract(id, from: destination, fallback: cover)
-            try await store.insert(track, raw: raw.isEmpty ? nil : raw)
+            await store.artwork.extract(track.id, from: destination, fallback: cover)
+            try await store.insert(track, raw: probe.raw.isEmpty ? nil : probe.raw)
             return track
         } catch {
             try? FileManager.default.removeItem(at: destination)
-            store.artwork.delete(id)
+            store.artwork.delete(track.id)
             throw error
         }
+    }
+
+    /// Swaps `existing`'s audio for a better copy of the same recording. The
+    /// track keeps its id, tags, edits, analysis and history; only the file and
+    /// its format change. Art is taken from the new file if the track had none.
+    public func replace(_ existing: Track, with probe: Probe, cover: Data?) async throws -> Track {
+        let relative = try copyIntoLibrary(probe.file)
+        let destination = store.mediaDirectory.appending(path: relative)
+        var track = existing
+        track.filePath = relative
+        track.format = probe.track.format
+        track.sampleRate = probe.track.sampleRate
+        track.bitDepth = probe.track.bitDepth
+        track.channels = probe.track.channels
+        track.durationMs = probe.track.durationMs
+        do {
+            try await store.upsert(track)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
+        try? FileManager.default.removeItem(at: store.mediaDirectory.appending(path: existing.filePath))
+        if !store.artwork.hasArtwork(track.id) {
+            await store.artwork.extract(track.id, from: destination, fallback: cover)
+        }
+        return track
+    }
+
+    /// Copies bit for bit into the media directory; returns the path relative to it.
+    private func copyIntoLibrary(_ file: URL) throws -> String {
+        let relative = "\(UUID().uuidString).\(file.pathExtension.lowercased())"
+        try FileManager.default.copyItem(at: file, to: store.mediaDirectory.appending(path: relative))
+        return relative
     }
 
     // MARK: - Helpers
@@ -170,11 +233,12 @@ public struct ImportService: Sendable {
             .sorted { $0.path < $1.path }
     }
 
-    static func formatName(_ ext: String) -> String {
+    /// `codec` tells ALAC from AAC in .m4a and .caf files.
+    static func formatName(_ ext: String, codec: AudioFormatID? = nil) -> String {
         switch ext {
         case "wave": "wav"
         case "aif": "aiff"
-        case "m4a", "caf": "alac" // Treated as lossless; AAC-in-m4a is refined once we read the codec.
+        case "m4a", "caf": codec == kAudioFormatMPEG4AAC ? "aac" : "alac"
         default: ext
         }
     }

@@ -35,6 +35,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Android can't watch a folder for an app in the background; catch up on what arrived meanwhile.
+        (application as MotifApp).folderImporter.scan()
         // Connecting a controller starts PlaybackService, which owns the media notification.
         controller = MediaController.Builder(this, SessionToken(this, ComponentName(this, PlaybackService::class.java))).buildAsync()
     }
