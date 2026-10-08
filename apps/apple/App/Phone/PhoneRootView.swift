@@ -7,6 +7,7 @@ struct PhoneRootView: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var account = model.account
         TabView(selection: $model.phoneTab) {
             NavigationStack { PhoneLibraryView() }
                 .withMiniPlayer()
@@ -31,7 +32,7 @@ struct PhoneRootView: View {
         .sheet(isPresented: $model.showImport) { ImportSheet() }
         .fullScreenCover(isPresented: $model.showNowPlaying) { NowPlayingView() }
         .sheet(isPresented: $model.showSettings) { PhoneSettingsView() }
-        .fullScreenCover(isPresented: $model.account.showWelcome) { PhoneWelcomeView() }
+        .fullScreenCover(isPresented: $account.showWelcome) { PhoneWelcomeView() }
         .crateNamePrompt()
     }
 }

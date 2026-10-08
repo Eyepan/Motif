@@ -24,6 +24,7 @@ struct MacRootView: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var account = model.account
         NavigationSplitView {
             List(selection: $selection) {
                 Section("Library") {
@@ -84,7 +85,7 @@ struct MacRootView: View {
         }
         .background(Theme.macGround)
         .crateNamePrompt()
-        .sheet(isPresented: $model.account.showWelcome) { MacWelcomeView() }
+        .sheet(isPresented: $account.showWelcome) { MacWelcomeView() }
     }
 }
 #endif
