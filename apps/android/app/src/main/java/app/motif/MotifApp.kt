@@ -3,6 +3,8 @@ package app.motif
 import android.app.Application
 import android.content.Context
 import app.motif.data.ArtworkStore
+import app.motif.data.CrateStore
+import app.motif.data.HistoryStore
 import app.motif.data.LibraryStore
 import app.motif.data.Track
 import app.motif.dsp.MotifDsp
@@ -43,6 +45,12 @@ class MotifApp : Application() {
     }
 
     val artwork: ArtworkStore by lazy { ArtworkStore(filesDir) }
+
+    val history: HistoryStore by lazy { HistoryStore(this) }
+
+    val crates: CrateStore by lazy {
+        CrateStore(history, library).also { store -> scope.launch { store.load() } }
+    }
 
     private val _analyzeOnImport by lazy { MutableStateFlow(prefs.getBoolean(KEY_ANALYZE, true)) }
     val analyzeOnImport: StateFlow<Boolean> get() = _analyzeOnImport.asStateFlow()

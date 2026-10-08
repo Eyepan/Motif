@@ -20,12 +20,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.MotifApp
+import app.motif.data.Track
 import app.motif.ui.theme.Motif
 
 enum class Tab(val label: String, val icon: ImageVector) {
@@ -43,8 +45,11 @@ fun MotifRoot(app: MotifApp) {
     var tab by rememberSaveable { mutableStateOf(Tab.Library) }
     var showNowPlaying by rememberSaveable { mutableStateOf(false) }
     var showImport by rememberSaveable { mutableStateOf(false) }
+    var openCrate by rememberSaveable { mutableStateOf<String?>(null) }
+    var addToCrate by remember { mutableStateOf<List<Track>?>(null) }
     val tracks by app.library.tracks.collectAsStateWithLifecycle()
     val player by app.playback.state.collectAsStateWithLifecycle()
+    val crates by app.crates.crates.collectAsStateWithLifecycle()
 
     Scaffold(
         containerColor = Motif.ground,
@@ -82,9 +87,12 @@ fun MotifRoot(app: MotifApp) {
                 onDelete = app::delete,
                 onImport = { showImport = true },
                 onOpenMix = { tab = Tab.Mix },
+                crates = crates,
+                onAddToCrate = { addToCrate = listOf(it) },
+                onOpenCrate = { openCrate = it.id; tab = Tab.Crates },
                 modifier = modifier,
             )
-            Tab.Crates -> ComingSoon("No crates yet", "Crates for building sets are coming soon.", modifier)
+            Tab.Crates -> CratesScreen(app, tracks, player.current, openCrate, onOpen = { openCrate = it }, modifier = modifier)
             Tab.Mix -> DjScreen(app.dj, tracks, modifier)
             Tab.Search -> SearchScreen(
                 tracks = tracks,
@@ -99,6 +107,7 @@ fun MotifRoot(app: MotifApp) {
     if (showNowPlaying && player.current != null) {
         NowPlayingSheet(player, app.playback, onDismiss = { showNowPlaying = false })
     }
+    addToCrate?.let { picked -> CratePicker(app, picked, onDismiss = { addToCrate = null }) }
     if (showImport) {
         ImportSheet(app, onDismiss = { showImport = false }, onDiscover = { showImport = false; tab = Tab.Discover })
     }

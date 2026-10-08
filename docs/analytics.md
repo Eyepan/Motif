@@ -121,7 +121,7 @@ These make the log self-contained, so a recap can describe a track even after it
 | `track_updated` | changed fields only | `LibraryStore.upsert` on an existing id (tag edits) |
 | `track_removed` | `track_id` | `LibraryStore.delete` |
 | `liked` / `unliked` | `track_id` | heart button (not built yet) |
-| `crate_changed` | `crate_id`, `name`, `added` / `removed` track ids | Crates (not built yet) |
+| `crate_changed` | `crate_id`, `name`, `deleted`, `added` / `removed` track keys | Crates (docs/crates.md) |
 | `rated` | `track_id`, `stars` | not planned; listed so the name is reserved |
 
 ### App
@@ -176,7 +176,7 @@ History is collected to the user's Motif account, not only kept on the device. T
 - `play(_:startAt:)` doesn't know what started playback. It needs a `context` argument from each view.
 - `NowPlayingController` doesn't tell the engine a command came from the lock screen or headset; handlers need to pass that through.
 - Tracks have no content hash yet, so `track_key` needs a `content_hash` column and a hash step in `ImportService.ingest`.
-- No queue modes, likes or crates yet. Their events are listed so the names and shapes are settled before the features exist.
+- No queue modes or likes yet. Their events are listed so the names and shapes are settled before the features exist. Crates are built and write `crate_changed` (docs/crates.md).
 
 ## Decisions (Pan, 2026-10-07)
 

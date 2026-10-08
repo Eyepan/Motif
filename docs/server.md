@@ -8,7 +8,7 @@ Motif stays local-first. Playback, the library, analysis and DJ mixing run on th
 
 - **Accounts**: a username and password, so a user's devices can find each other.
 - **The listening history log**: every device uploads its events and pulls the others', so each device ends up holding the full merged log (docs/analytics.md). Recaps are computed from that log.
-- **Library metadata, playlists and crates** (next): the same log, see Decisions.
+- **Library metadata, playlists and crates**: the same log, see Decisions. Crates already write `crate_changed` events (docs/crates.md); library edits and playlists are next.
 
 It does not store or stream audio. Files stay on each device. Syncing audio through user-owned storage such as S3 is a later step and does not change anything here.
 

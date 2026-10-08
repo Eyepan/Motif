@@ -14,6 +14,8 @@ struct MacLibraryTable: View {
     /// Tracks to list, or nil for the whole library.
     var tracks: [Track]?
     var newestFirst = false
+    /// The crate being shown, which adds Remove from Crate.
+    var crate: Crate?
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var sortOrder: [KeyPathComparator<Row>] = []
@@ -74,7 +76,12 @@ struct MacLibraryTable: View {
             .width(min: 70, ideal: 90, max: 120)
         }
         .contextMenu(forSelectionType: Row.ID.self) { ids in
+            let picked = rows.filter { ids.contains($0.id) }.map(\.track)
             Button("Play") { play(ids, in: rows) }
+            AddToCrateMenu(tracks: picked)
+            if let crate {
+                Button("Remove from Crate") { Task { await model.remove(picked, from: crate) } }
+            }
             Divider()
             Button("Delete from Library", role: .destructive) {
                 let doomed = rows.filter { ids.contains($0.id) }.map(\.track)
@@ -92,11 +99,15 @@ struct MacLibraryTable: View {
                 } actions: {
                     Button("Import…") { importing = true }
                 }
+            } else if let crate, crate.trackKeys.isEmpty {
+                ContentUnavailableView("Empty crate", systemImage: "square.stack",
+                                       description: Text("Right-click songs in your library and choose Add to Crate."))
             }
         }
         .searchable(text: $query, prompt: "Search · try bpm:120-126 key:8A")
         .navigationTitle(title)
-        .navigationSubtitle("\(rows.count) songs · all offline")
+        .navigationSubtitle(crate.map { crateSummary(tracks ?? [], missing: model.missingCount(in: $0)) }
+                            ?? "\(rows.count) songs · all offline")
         .toolbar {
             if model.activeImportCount > 0 {
                 ToolbarItem {

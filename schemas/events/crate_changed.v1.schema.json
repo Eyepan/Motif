@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motif.app/schemas/events/crate_changed.v1.schema.json",
+  "title": "crate_changed v1",
+  "description": "One edit to a crate. Devices rebuild crates by replaying these in id order (docs/crates.md). Every field but crate_id is optional; an event carries only what changed.",
+  "type": "object",
+  "required": ["crate_id"],
+  "properties": {
+    "crate_id": { "type": "string", "format": "uuid", "description": "Minted lowercase by the device that created the crate." },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Creates the crate, renames it, or brings a deleted one back (empty)." },
+    "deleted": { "const": true, "description": "Deletes the crate and empties it." },
+    "added": {
+      "type": "array", "maxItems": 200, "uniqueItems": true,
+      "description": "Track keys (lowercase hex SHA-256 of the audio file) appended to the crate.",
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "removed": {
+      "type": "array", "maxItems": 200, "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    }
+  },
+  "additionalProperties": true
+}

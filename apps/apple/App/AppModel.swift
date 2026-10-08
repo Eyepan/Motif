@@ -37,6 +37,7 @@ final class AppModel {
     enum PhoneTab: Hashable { case library, crates, mix, search }
 
     let store: LibraryStore
+    let crateStore: CrateStore
     let player: PlaybackEngine
     let importer: ImportService
     let folderImporter: FolderImporter
@@ -46,8 +47,13 @@ final class AppModel {
         didSet {
             albums = Self.albums(of: tracks, artwork: store.artwork)
             artists = Self.artists(of: tracks)
+            tracksByKey = Dictionary(tracks.compactMap { t in t.contentHash.map { ($0, t) } }, uniquingKeysWith: { first, _ in first })
         }
     }
+    /// Tracks by content hash, for resolving crate members.
+    private var tracksByKey: [String: Track] = [:]
+    /// Crates in the order they were made.
+    private(set) var crates: [Crate] = []
     /// Albums, newest first.
     private(set) var albums: [AlbumGroup] = []
     /// Artists by name, from split credits.
@@ -59,13 +65,16 @@ final class AppModel {
     var phoneTab: PhoneTab = .library
     var showImport = false
     var showNowPlaying = false
+    /// A crate being created or renamed; the root view shows the name prompt while set.
+    var crateNaming: CrateNaming?
 
     var analyzeOnImport: Bool {
         didSet { UserDefaults.standard.set(analyzeOnImport, forKey: "analyzeOnImport") }
     }
 
-    init(store: LibraryStore) {
+    init(store: LibraryStore, history: HistoryStore) {
         self.store = store
+        crateStore = CrateStore(history: history, library: store)
         player = PlaybackEngine(store: store)
         importer = ImportService(store: store)
         folderImporter = FolderImporter(importer: importer, store: store,
@@ -109,6 +118,7 @@ final class AppModel {
             errorMessage = error.localizedDescription
         }
         await refresh()
+        await refreshCrates()
     }
 
     /// Albums by title, compared without case or extra whitespace, so a soundtrack whose
@@ -165,6 +175,50 @@ final class AppModel {
         let unknown = tracks.filter { ($0.artist ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         if !unknown.isEmpty { groups.append(ArtistGroup(id: "\u{0}unknown", name: "Unknown artist", tracks: unknown)) }
         return groups
+    }
+
+    // MARK: - Crates
+
+    func refreshCrates() async {
+        do { crates = try await crateStore.crates() } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// The crate's tracks that are on this device, in crate order.
+    func tracks(in crate: Crate) -> [Track] {
+        crate.trackKeys.compactMap { tracksByKey[$0] }
+    }
+
+    /// Tracks in the crate that were added on another device and aren't imported here.
+    func missingCount(in crate: Crate) -> Int {
+        crate.trackKeys.count - tracks(in: crate).count
+    }
+
+    func createCrate(named name: String, with tracks: [Track] = []) async {
+        await editCrates { _ = try await crateStore.create(name: name, with: tracks) }
+    }
+
+    func renameCrate(_ crate: Crate, to name: String) async {
+        await editCrates { try await crateStore.rename(crate.id, to: name) }
+    }
+
+    func deleteCrate(_ crate: Crate) async {
+        await editCrates { try await crateStore.delete(crate.id) }
+    }
+
+    func add(_ tracks: [Track], to crate: Crate) async {
+        await editCrates { try await crateStore.add(tracks, to: crate.id) }
+    }
+
+    func remove(_ tracks: [Track], from crate: Crate) async {
+        let keys = tracks.compactMap(\.contentHash)
+        await editCrates { try await crateStore.remove(keys: keys, from: crate.id) }
+    }
+
+    /// Runs an edit, then reloads crates, and tracks too, since adding a track can save its content hash.
+    private func editCrates(_ edit: () async throws -> Void) async {
+        do { try await edit() } catch { errorMessage = error.localizedDescription }
+        await refresh()
+        await refreshCrates()
     }
 
     // MARK: - Import

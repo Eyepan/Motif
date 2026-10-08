@@ -159,15 +159,18 @@ fun TrackRow(
     onClick: () -> Unit,
     onDelete: (() -> Unit)? = null,
     mixWith: Track? = null,
+    onAddToCrate: (() -> Unit)? = null,
+    onRemoveFromCrate: (() -> Unit)? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val hasMenu = onDelete != null || onAddToCrate != null || onRemoveFromCrate != null
     val other = mixWith?.takeIf { it.id != track.id }
     val tempoMatch = other != null && MixMatch.tempos(other, track)
     val keyMatch = other != null && MixMatch.keys(other, track)
     Box {
         Row(
             Modifier
-                .combinedClickable(onClick = onClick, onLongClick = onDelete?.let { { menu = true } })
+                .combinedClickable(onClick = onClick, onLongClick = if (hasMenu) ({ menu = true }) else null)
                 .heightIn(min = 60.dp)
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .semantics(mergeDescendants = true) {
@@ -200,9 +203,17 @@ fun TrackRow(
                 MixValue(track.musicalKey ?: "—", Motif.keyColor(track.musicalKey), keyMatch)
             }
         }
-        if (onDelete != null) {
+        if (hasMenu) {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Delete from library") }, onClick = { menu = false; onDelete() })
+                onAddToCrate?.let { add ->
+                    DropdownMenuItem(text = { Text("Add to crate") }, onClick = { menu = false; add() })
+                }
+                onRemoveFromCrate?.let { remove ->
+                    DropdownMenuItem(text = { Text("Remove from crate") }, onClick = { menu = false; remove() })
+                }
+                onDelete?.let { delete ->
+                    DropdownMenuItem(text = { Text("Delete from library") }, onClick = { menu = false; delete() })
+                }
             }
         }
     }

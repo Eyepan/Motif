@@ -4,6 +4,7 @@ import SwiftUI
 
 enum SidebarItem: Hashable {
     case songs, albums, artists, recent, catalogs
+    case crate(String)
 
     var title: String {
         switch self {
@@ -12,6 +13,7 @@ enum SidebarItem: Hashable {
         case .artists: "Artists"
         case .recent: "Recently Added"
         case .catalogs: "Open Catalogs"
+        case .crate: "Crate"
         }
     }
 }
@@ -30,7 +32,24 @@ struct MacRootView: View {
                     Label("Recently Added", systemImage: "clock").tag(SidebarItem.recent)
                 }
                 Section("Crates") {
-                    Text("No crates yet").foregroundStyle(Theme.secondary)
+                    ForEach(model.crates) { crate in
+                        Label(crate.name, systemImage: "square.stack")
+                            .tag(SidebarItem.crate(crate.id))
+                            .contextMenu {
+                                Button("Play") { model.player.play(model.tracks(in: crate)) }
+                                Button("Rename…") { model.crateNaming = .rename(crate) }
+                                Divider()
+                                Button("Delete Crate", role: .destructive) {
+                                    if selection == .crate(crate.id) { selection = .songs }
+                                    Task { await model.deleteCrate(crate) }
+                                }
+                            }
+                    }
+                    Button { model.crateNaming = .create([]) } label: {
+                        Label("New Crate", systemImage: "plus")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.secondary)
                 }
                 Section("Devices") {
                     Label("This Mac", systemImage: "laptopcomputer").foregroundStyle(Theme.secondary)
@@ -49,6 +68,12 @@ struct MacRootView: View {
                 case .albums: MacAlbumGrid()
                 case .artists: MacArtistList()
                 case .catalogs: DiscoverView()
+                case .crate(let id):
+                    if let crate = model.crates.first(where: { $0.id == id }) {
+                        MacLibraryTable(title: crate.name, tracks: model.tracks(in: crate), crate: crate)
+                    } else {
+                        ContentUnavailableView("Crate deleted", systemImage: "square.stack")
+                    }
                 }
             }
             .id(selection)
@@ -57,6 +82,7 @@ struct MacRootView: View {
             MacPlayerBar()
         }
         .background(Theme.macGround)
+        .crateNamePrompt()
     }
 }
 #endif

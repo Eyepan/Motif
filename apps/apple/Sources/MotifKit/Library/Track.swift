@@ -33,13 +33,16 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
     public var addedAt: Date
     /// The album's credited artist (TPE2 / ALBUMARTIST), when tagged.
     public var albumArtist: String?
+    /// SHA-256 of the audio file, lowercase hex: the track's identity across devices (`track_key`).
+    /// Filled lazily by `LibraryStore.contentHash(for:)`; `upsert` never overwrites it.
+    public var contentHash: String?
 
     public init(
         id: UUID = UUID(), title: String, artist: String? = nil, album: String? = nil,
         durationMs: Int, filePath: String, format: String, sampleRate: Int? = nil,
         bitDepth: Int? = nil, channels: Int? = nil, source: Source, sourceRef: String? = nil,
         licenseURL: URL? = nil, bpm: Double? = nil, loudnessDb: Double? = nil, musicalKey: String? = nil,
-        waveform: [UInt8]? = nil, addedAt: Date = .now, albumArtist: String? = nil
+        waveform: [UInt8]? = nil, addedAt: Date = .now, albumArtist: String? = nil, contentHash: String? = nil
     ) {
         self.id = id; self.title = title; self.artist = artist; self.album = album
         self.durationMs = durationMs; self.filePath = filePath; self.format = format
@@ -47,6 +50,7 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
         self.source = source; self.sourceRef = sourceRef; self.licenseURL = licenseURL
         self.bpm = bpm; self.loudnessDb = loudnessDb; self.musicalKey = musicalKey
         self.waveform = waveform; self.addedAt = addedAt; self.albumArtist = albumArtist
+        self.contentHash = contentHash
     }
 
     public var isLossless: Bool { ["flac", "wav", "alac", "aiff"].contains(format) }

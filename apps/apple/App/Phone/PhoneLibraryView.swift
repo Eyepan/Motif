@@ -50,6 +50,10 @@ struct PhoneLibraryView: View {
                         .swipeActions {
                             Button("Delete", role: .destructive) { Task { await model.delete(track) } }
                         }
+                        .contextMenu {
+                            AddToCrateMenu(tracks: [track])
+                            Button("Delete from Library", role: .destructive) { Task { await model.delete(track) } }
+                        }
                     }
                 } header: {
                     SectionHeader(title: "Songs", detail: "\(songs.count) · \(songs.allSatisfy(\.isLossless) ? "lossless" : "on device")")
@@ -77,9 +81,18 @@ struct PhoneLibraryView: View {
                     .listRowBackground(Color.clear)
                 }
             case .crates:
-                ContentUnavailableView("No crates yet", systemImage: "square.stack",
-                                       description: Text("Crates for building sets are coming soon."))
+                if model.crates.isEmpty {
+                    ContentUnavailableView {
+                        Label("No crates yet", systemImage: "square.stack")
+                    } description: {
+                        Text("Long-press a song and choose Add to Crate.")
+                    } actions: {
+                        Button("New Crate") { model.crateNaming = .create([]) }
+                    }
                     .listRowBackground(Color.clear)
+                } else {
+                    CrateRows()
+                }
             }
         }
         .listStyle(.plain)
@@ -99,6 +112,7 @@ struct PhoneLibraryView: View {
             }
         }
         .navigationTitle("Library")
+        .crateDestination()
         .searchable(text: $query, prompt: "Songs, artists, BPM, key")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
