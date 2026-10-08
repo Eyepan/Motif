@@ -53,7 +53,7 @@ class CratesTest {
         val change = CrateChange("c", name = "Warm up", added = listOf("k"))
         assertEquals(change, CrateChange.parse(change.toJson()))
         val json = JSONObject(CrateChange("c", deleted = true).toJson())
-        assertEquals(setOf("crate_id", "deleted"), json.keySet())
+        assertEquals(setOf("crate_id", "deleted"), json.keys().asSequence().toSet())
         assertNull(CrateChange.parse("""{"name":"No id"}"""))
         assertNull(CrateChange.parse("not json"))
     }
