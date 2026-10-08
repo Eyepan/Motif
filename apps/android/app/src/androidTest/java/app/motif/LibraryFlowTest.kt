@@ -5,7 +5,14 @@ import android.app.Instrumentation
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -51,6 +58,8 @@ class LibraryFlowTest {
         runBlocking {
             app.library.load()
             app.library.tracks.value.forEach { app.library.delete(it) }
+            app.crates.load()
+            app.crates.crates.value.forEach { app.crates.delete(it.id) }
         }
         writeFixtures(File(app.cacheDir, "fixtures"))
         Intents.init()
@@ -114,6 +123,29 @@ class LibraryFlowTest {
         compose.onNodeWithContentDescription("Pause").performClick()
         compose.waitUntil(5_000) { !app.playback.state.value.isPlaying }
         compose.onNodeWithContentDescription("Play").assertExists()
+    }
+
+    @Test fun addTrackToNewCrate() {
+        importDirectly()
+
+        compose.onNode(hasSetTextAction()).performTextInput("Afterglow")
+        compose.onNodeWithContentDescription("Afterglow,", substring = true).performTouchInput { longClick() }
+        compose.onNodeWithText("Add to crate").performClick()
+        compose.onNodeWithText("New crate…").performClick()
+        compose.onNodeWithTag("crate-name").performTextInput("Warm up")
+        compose.onNodeWithText("Create").performClick()
+        compose.waitUntil(10_000) { app.crates.crates.value.singleOrNull()?.trackKeys?.size == 1 }
+
+        // The key is the SHA-256 of the imported file.
+        val afterglow = app.library.tracks.value.first { it.title == "Afterglow" }
+        assertEquals(afterglow.contentHash, app.crates.crates.value.single().trackKeys.single())
+        val sha = java.security.MessageDigest.getInstance("SHA-256").digest(app.library.fileFor(afterglow).readBytes())
+        assertEquals(sha.joinToString("") { "%02x".format(it) }, afterglow.contentHash)
+
+        compose.onNode(hasText("Crates") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).performClick()
+        compose.onNodeWithText("Warm up").performClick()
+        compose.onNodeWithContentDescription("Afterglow,", substring = true).assertExists()
+        Screenshots.take("05-crate")
     }
 
     /** Imports the fixture folder without going through the sheet, for tests about what comes after. */

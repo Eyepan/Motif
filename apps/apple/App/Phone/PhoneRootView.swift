@@ -12,10 +12,7 @@ struct PhoneRootView: View {
                 .withMiniPlayer()
                 .tabItem { Label("Library", systemImage: "music.note.list") }
                 .tag(AppModel.PhoneTab.library)
-            NavigationStack {
-                ComingSoonView(title: "Crates", systemImage: "square.stack",
-                               detail: "Group tracks into sets for a gig or a mood.")
-            }
+            NavigationStack { PhoneCratesView() }
             .withMiniPlayer()
             .tabItem { Label("Crates", systemImage: "square.stack") }
             .tag(AppModel.PhoneTab.crates)
@@ -33,6 +30,7 @@ struct PhoneRootView: View {
         }
         .sheet(isPresented: $model.showImport) { ImportSheet() }
         .fullScreenCover(isPresented: $model.showNowPlaying) { NowPlayingView() }
+        .crateNamePrompt()
     }
 }
 

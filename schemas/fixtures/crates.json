@@ -1,0 +1,270 @@
+{
+  "description": "crate_changed events in arrival order (shuffled, one duplicate) and the crates every platform must rebuild from them. See docs/crates.md.",
+  "events": [
+    {
+      "id": "01921938-f098-700f-8000-00000000000f",
+      "type": "crate_changed",
+      "v": 2,
+      "at_ms": 1727000015000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "name": "Ignored"
+      }
+    },
+    {
+      "id": "01921938-c1b8-7003-8000-000000000003",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000003000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "added": [
+          "6ab9f1eb8f7d3388f4f9d586f66e99fd54080df2c446f0e58668b09c08a16dd0",
+          "015f7e6bc5aeaf483724089e9252cc13b50951a6b69412522765cff4d780306e",
+          "2f5052c9fd15b19a18c584d01363568198613f0c34e84409ef7938709a159ec2"
+        ]
+      }
+    },
+    {
+      "id": "01921938-dd10-700a-8000-00000000000a",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000010000,
+      "tz_min": 330,
+      "device_id": "mac",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000c",
+        "name": "Closing",
+        "added": [
+          "2f5052c9fd15b19a18c584d01363568198613f0c34e84409ef7938709a159ec2"
+        ]
+      }
+    },
+    {
+      "id": "01921938-f868-7011-8000-000000000011",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000017000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "name": "   "
+      }
+    },
+    {
+      "id": "01921938-d540-7008-8000-000000000008",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000008000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000b",
+        "deleted": true
+      }
+    },
+    {
+      "id": "01921938-d158-7007-8000-000000000007",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000007000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "name": "  Warm up  "
+      }
+    },
+    {
+      "id": "01921938-e4e0-700c-8000-00000000000c",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000012000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000c",
+        "name": "Closing",
+        "added": [
+          "6ab9f1eb8f7d3388f4f9d586f66e99fd54080df2c446f0e58668b09c08a16dd0"
+        ]
+      }
+    },
+    {
+      "id": "01921938-c5a0-7004-8000-000000000004",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000004000,
+      "tz_min": 330,
+      "device_id": "mac",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000b",
+        "name": "Peak time",
+        "added": [
+          "94091dd64a21ffe94214bc6d17deeb43873a5cf2f0a71b4b5caa9a5c81b6967d"
+        ]
+      }
+    },
+    {
+      "id": "01921938-ecb0-700e-8000-00000000000e",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000014000,
+      "tz_min": 330,
+      "device_id": "mac",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000d",
+        "name": "Afters"
+      }
+    },
+    {
+      "id": "01921938-cd70-7006-8000-000000000006",
+      "type": "play",
+      "v": 1,
+      "at_ms": 1727000006000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "track_id": "x"
+      }
+    },
+    {
+      "id": "01921938-f480-7010-8000-000000000010",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000016000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "name": "No id"
+      }
+    },
+    {
+      "id": "01921938-d928-7009-8000-000000000009",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000009000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000b",
+        "added": [
+          "88dbf612972c594a2c2f6dde493ef1c4cd27adba8c36e6ebd00b89ff143aba61"
+        ]
+      }
+    },
+    {
+      "id": "01921938-bdd0-7002-8000-000000000002",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000002000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "name": "Warm-up"
+      }
+    },
+    {
+      "id": "01921938-b9e8-7001-8000-000000000001",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000001000,
+      "tz_min": 330,
+      "device_id": "mac",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000d",
+        "added": [
+          "1d92ad4b6987fa0347cc5d2fb6cf9e47c83f4f6caeb3b5ef6f629730528921c3"
+        ]
+      }
+    },
+    {
+      "id": "01921938-c1b8-7003-8000-000000000003",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000003000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "added": [
+          "6ab9f1eb8f7d3388f4f9d586f66e99fd54080df2c446f0e58668b09c08a16dd0",
+          "015f7e6bc5aeaf483724089e9252cc13b50951a6b69412522765cff4d780306e",
+          "2f5052c9fd15b19a18c584d01363568198613f0c34e84409ef7938709a159ec2"
+        ]
+      }
+    },
+    {
+      "id": "01921938-e8c8-700d-8000-00000000000d",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000013000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "added": [
+          "015f7e6bc5aeaf483724089e9252cc13b50951a6b69412522765cff4d780306e",
+          "6ab9f1eb8f7d3388f4f9d586f66e99fd54080df2c446f0e58668b09c08a16dd0"
+        ]
+      }
+    },
+    {
+      "id": "01921938-c988-7005-8000-000000000005",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000005000,
+      "tz_min": 330,
+      "device_id": "phone",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000a",
+        "removed": [
+          "015f7e6bc5aeaf483724089e9252cc13b50951a6b69412522765cff4d780306e"
+        ]
+      }
+    },
+    {
+      "id": "01921938-e0f8-700b-8000-00000000000b",
+      "type": "crate_changed",
+      "v": 1,
+      "at_ms": 1727000011000,
+      "tz_min": 330,
+      "device_id": "mac",
+      "payload": {
+        "crate_id": "0192a1b0-0000-7000-8000-00000000000c",
+        "deleted": true
+      }
+    }
+  ],
+  "crates": [
+    {
+      "id": "0192a1b0-0000-7000-8000-00000000000d",
+      "name": "Afters",
+      "tracks": [
+        "1d92ad4b6987fa0347cc5d2fb6cf9e47c83f4f6caeb3b5ef6f629730528921c3"
+      ]
+    },
+    {
+      "id": "0192a1b0-0000-7000-8000-00000000000a",
+      "name": "Warm up",
+      "tracks": [
+        "6ab9f1eb8f7d3388f4f9d586f66e99fd54080df2c446f0e58668b09c08a16dd0",
+        "2f5052c9fd15b19a18c584d01363568198613f0c34e84409ef7938709a159ec2",
+        "015f7e6bc5aeaf483724089e9252cc13b50951a6b69412522765cff4d780306e"
+      ]
+    },
+    {
+      "id": "0192a1b0-0000-7000-8000-00000000000c",
+      "name": "Closing",
+      "tracks": [
+        "6ab9f1eb8f7d3388f4f9d586f66e99fd54080df2c446f0e58668b09c08a16dd0"
+      ]
+    }
+  ]
+}

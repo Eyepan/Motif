@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SQLite3
 
@@ -77,7 +78,10 @@ public actor LibraryStore {
     /// Bytes in `Track.waveform`.
     public static let waveformLength = 128
 
+    /// Columns `upsert` writes, in bind order.
     private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at, album_artist"
+    /// Columns read into a `Track`: everything `upsert` writes, plus the content hash.
+    private static let readColumns = columns + ", content_hash"
 
     /// Where imported audio files live. Track.filePath is relative to this.
     public nonisolated let mediaDirectory: URL
@@ -148,13 +152,13 @@ public actor LibraryStore {
     }
 
     public func allTracks() throws -> [Track] {
-        try query("SELECT \(Self.columns) FROM tracks ORDER BY added_at DESC")
+        try query("SELECT \(Self.readColumns) FROM tracks ORDER BY added_at DESC")
     }
 
     public func search(_ text: String) throws -> [Track] {
         let like = "%\(text)%"
         return try query(
-            "SELECT \(Self.columns) FROM tracks WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1 ORDER BY artist, album, title",
+            "SELECT \(Self.readColumns) FROM tracks WHERE title LIKE ?1 OR artist LIKE ?1 OR album LIKE ?1 ORDER BY artist, album, title",
             bind: [like]
         )
     }
@@ -252,6 +256,28 @@ public actor LibraryStore {
             "UPDATE tracks SET bpm = ?1, loudness_db = ?2, musical_key = ?3, waveform = ?4 WHERE id = ?5",
             bind: [analysis.bpm, analysis.loudnessDb, analysis.musicalKey, Data(analysis.waveform), id.uuidString]
         )
+    }
+
+    /// The track's content hash, hashing its file and saving the result the first time.
+    public func contentHash(for track: Track) throws -> String {
+        if let hash = track.contentHash { return hash }
+        if let saved = try strings("SELECT content_hash FROM tracks WHERE id = ?1", bind: [track.id.uuidString]).first?.first ?? nil {
+            return saved
+        }
+        let hash = try Self.sha256(of: url(for: track))
+        try run("UPDATE tracks SET content_hash = ?1 WHERE id = ?2", bind: [hash, track.id.uuidString])
+        return hash
+    }
+
+    /// Lowercase hex SHA-256 of a file, read in 1 MiB chunks.
+    static func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - SQLite plumbing
@@ -355,7 +381,8 @@ public actor LibraryStore {
             musicalKey: text(15),
             waveform: bytes(16),
             addedAt: Date(timeIntervalSince1970: TimeInterval(int(17) ?? 0)),
-            albumArtist: text(18)
+            albumArtist: text(18),
+            contentHash: text(19)
         )
     }
 

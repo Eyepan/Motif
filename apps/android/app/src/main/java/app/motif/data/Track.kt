@@ -29,6 +29,11 @@ data class Track(
     /** Unix seconds. */
     val addedAt: Long,
     val albumArtist: String? = null,
+    /**
+     * SHA-256 of the audio file, lowercase hex: the track's identity across
+     * devices (`track_key`). Filled lazily by [LibraryStore.contentHash].
+     */
+    val contentHash: String? = null,
 ) {
     val isLossless: Boolean get() = format in setOf("flac", "wav", "alac", "aiff")
 
@@ -85,7 +90,7 @@ data class Track(
             album == other.album && albumArtist == other.albumArtist && durationMs == other.durationMs && filePath == other.filePath &&
             format == other.format && sampleRate == other.sampleRate && bitDepth == other.bitDepth &&
             bpm == other.bpm && musicalKey == other.musicalKey && loudnessDb == other.loudnessDb &&
-            firstDownbeat == other.firstDownbeat &&
+            firstDownbeat == other.firstDownbeat && contentHash == other.contentHash &&
             waveform.contentEquals(other.waveform)
 
     override fun hashCode(): Int = id.hashCode()

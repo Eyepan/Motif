@@ -30,9 +30,9 @@ scripts/emulator-tests.sh     # screenshots land in build/emulator-tests
 ## Layout
 
 - `app/src/main/java/app/motif/`
-  - `data/`: `Track`, `LibraryStore` (SQLite from the shared schema), `LibraryFilter` (`bpm:` / `key:` search)
+  - `data/`: `Track`, `LibraryStore` (SQLite from the shared schema), `LibraryFilter` (`bpm:` / `key:` search), `HistoryStore` (the event log from `schemas/history.sql`), `CrateStore` (crates rebuilt from that log, docs/crates.md)
   - `importer/`: copy files in untouched, read tags, decode with MediaCodec and analyse with the DSP core
   - `playback/`: `PlaybackEngine` (gapless ExoPlayer; "Mix into next" blends on a second player with tempo match and the DSP core's equal-power curve), `PlaybackService` (MediaSession, notification, headset/Bluetooth)
-  - `ui/`: Compose screens: Library, Search, Now Playing, Add Music; Crates and DJ Mix are placeholders for now
+  - `ui/`: Compose screens: Library, Crates, DJ Mix, Search, Discover, Now Playing, Add Music
 - `app/src/androidTest/`: emulator tests; `app/src/debug/`: the test folder provider
 - `dsp-jni/`: JNI entry points over `core/dsp`, built per ABI by `scripts/build-dsp.sh`

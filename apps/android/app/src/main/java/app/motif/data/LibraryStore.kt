@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.security.MessageDigest
 
 /**
  * The on-device library: SQLite created from the shared `schemas/library.sql`
@@ -24,13 +25,13 @@ class LibraryStore(private val context: Context) {
 
     private val helper = object : SQLiteOpenHelper(context, "library.sqlite", null, SCHEMA_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
-            statements("library.sql").forEach(db::execSQL)
+            schemaStatements(context, "library.sql").forEach(db::execSQL)
         }
 
         /** Android shipped at v2, so every step it needs is in schemas/migrations. Runs in one transaction. */
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
             for (version in oldVersion + 1..newVersion) {
-                statements("migrations/$version.sql").forEach(db::execSQL)
+                schemaStatements(context, "migrations/$version.sql").forEach(db::execSQL)
             }
         }
 
@@ -153,6 +154,21 @@ class LibraryStore(private val context: Context) {
         refresh()
     }
 
+    /** The track's content hash, hashing its file and saving the result the first time. */
+    suspend fun contentHash(track: Track): String = withContext(Dispatchers.IO) {
+        track.contentHash?.let { return@withContext it }
+        val db = helper.writableDatabase
+        db.rawQuery("SELECT content_hash FROM tracks WHERE id = ?", arrayOf(track.id)).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) return@withContext c.getString(0)
+        }
+        val hash = sha256(fileFor(track))
+        db.update("tracks", ContentValues().apply { put("content_hash", hash) }, "id = ?", arrayOf(track.id))
+        hash
+    }
+
+    /** Re-reads the library, e.g. after [contentHash] saved new hashes. */
+    suspend fun reload() = withContext(Dispatchers.IO) { refresh() }
+
     private val refreshLock = Mutex()
 
     /**
@@ -165,17 +181,6 @@ class LibraryStore(private val context: Context) {
             ArrayList<Track>(c.count).also { list -> while (c.moveToNext()) list += c.toTrack() }
         }
         withContext(Dispatchers.Main.immediate) { _tracks.value = list }
-    }
-
-    /** Statements from a schemas/ asset; the PRAGMA is handled by SQLiteOpenHelper's version. */
-    private fun statements(asset: String): List<String> {
-        val sql = context.assets.open(asset).bufferedReader().use { it.readText() }
-        return sql.lines()
-            .map { it.substringBefore("--").trimEnd() }
-            .joinToString("\n")
-            .split(";")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("PRAGMA", ignoreCase = true) }
     }
 
     companion object {
@@ -234,4 +239,19 @@ private fun Cursor.toTrack() = Track(
     firstDownbeat = double("beat_offset_ms")?.let { it / 1000 },
     addedAt = getLong(getColumnIndexOrThrow("added_at")),
     albumArtist = str("album_artist"),
+    contentHash = str("content_hash"),
 )
+
+/** Lowercase hex SHA-256 of a file, read in 1 MiB chunks. */
+internal fun sha256(file: File): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input ->
+        val buffer = ByteArray(1 shl 20)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            digest.update(buffer, 0, n)
+        }
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}

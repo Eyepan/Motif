@@ -7,7 +7,7 @@ struct MotifApp: App {
 
     init() {
         do {
-            _model = State(initialValue: AppModel(store: try LibraryStore.makeDefault()))
+            _model = State(initialValue: AppModel(store: try LibraryStore.makeDefault(), history: try HistoryStore.makeDefault()))
         } catch {
             fatalError("Couldn't open the library: \(error)")
         }

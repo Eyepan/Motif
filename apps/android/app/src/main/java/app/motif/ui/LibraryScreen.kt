@@ -47,10 +47,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.motif.data.Crate
 import app.motif.data.LibraryFilter
 import app.motif.data.Track
 import app.motif.data.albumsOf
 import app.motif.data.artistsOf
+import app.motif.data.tracksByKey
 import app.motif.ui.theme.Motif
 
 private enum class Segment(val label: String) { Songs("Songs"), Albums("Albums"), Artists("Artists"), Crates("Crates") }
@@ -64,6 +66,9 @@ fun LibraryScreen(
     onDelete: (Track) -> Unit,
     onImport: () -> Unit,
     onOpenMix: () -> Unit,
+    crates: List<Crate>,
+    onAddToCrate: (Track) -> Unit,
+    onOpenCrate: (Crate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var segment by rememberSaveable { mutableStateOf(Segment.Songs) }
@@ -72,6 +77,7 @@ fun LibraryScreen(
     val songs = remember(tracks, query) { LibraryFilter(query).let { f -> tracks.filter(f::matches) } }
     val albums = remember(tracks) { albumsOf(tracks) }
     val artists = remember(tracks) { artistsOf(tracks) }
+    val byKey = remember(tracks) { tracksByKey(tracks) }
 
     Column(modifier.nestedScroll(scroll.nestedScrollConnection)) {
         LargeTopAppBar(
@@ -134,7 +140,13 @@ fun LibraryScreen(
                         SectionHeader("Songs", "${songs.size} · ${if (songs.all(Track::isLossless)) "lossless" else "on device"}")
                     }
                     itemsIndexed(songs, key = { _, t -> t.id }) { index, track ->
-                        TrackRow(track, track.id == current?.id, onClick = { onPlay(songs, index) }, onDelete = { onDelete(track) }, mixWith = current)
+                        TrackRow(
+                            track, track.id == current?.id,
+                            onClick = { onPlay(songs, index) },
+                            onDelete = { onDelete(track) },
+                            mixWith = current,
+                            onAddToCrate = { onAddToCrate(track) },
+                        )
                     }
                 }
                 Segment.Albums -> items(albums, key = { it.key }) { album ->
@@ -156,13 +168,17 @@ fun LibraryScreen(
                         )
                     }
                 }
-                Segment.Crates -> item {
-                    Text(
-                        "Crates for building sets are coming soon.",
-                        color = Motif.secondary,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
-                    )
+                Segment.Crates -> if (crates.isEmpty()) {
+                    item {
+                        Text(
+                            "No crates yet. Long-press a song and choose Add to crate.",
+                            color = Motif.secondary,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        )
+                    }
+                } else {
+                    items(crates, key = { it.id }) { crate -> CrateListItem(crate, byKey, onOpen = { onOpenCrate(crate) }) }
                 }
             }
         }
