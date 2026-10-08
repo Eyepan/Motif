@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::auth::AuthUser;
 use crate::auth::idp::{IdpError, ProviderKind, VerifiedIdentity};
 use crate::auth::tokens::{
     ACCESS_TTL_SECS, REFRESH_TTL_DAYS, hash_refresh_token, new_refresh_token,
@@ -16,6 +15,63 @@ use crate::error::{ApiError, ApiResult};
 pub struct TokenRequest {
     provider: ProviderKind,
     id_token: String,
+    #[serde(default)]
+    device: Option<Device>,
+}
+
+/// What the app says about the device signing in, shown in the list of
+/// signed-in devices. Optional; nothing depends on it.
+#[derive(Deserialize, Default)]
+pub struct Device {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub platform: Option<Platform>,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum Platform {
+    Ios,
+    Ipados,
+    Macos,
+    Android,
+    #[serde(other)]
+    Other,
+}
+
+impl Platform {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Platform::Ios => "ios",
+            Platform::Ipados => "ipados",
+            Platform::Macos => "macos",
+            Platform::Android => "android",
+            Platform::Other => "other",
+        }
+    }
+}
+
+pub const MAX_DEVICE_NAME_CHARS: usize = 64;
+
+impl Device {
+    /// The name as stored: trimmed, control characters dropped, at most 64
+    /// characters. Too long is cut rather than refused so sign-in never fails
+    /// over a label.
+    fn clean_name(&self) -> Option<String> {
+        let name: String = self
+            .name
+            .as_deref()?
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+            .trim()
+            .chars()
+            .take(MAX_DEVICE_NAME_CHARS)
+            .collect();
+        let name = name.trim_end().to_string();
+        (!name.is_empty()).then_some(name)
+    }
 }
 
 #[derive(Deserialize)]
@@ -56,14 +112,18 @@ pub async fn token(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match sign_in(&state, &identity).await {
+        match sign_in(&state, &identity, req.device.as_ref()).await {
             Err(e) if attempt == 1 && is_constraint(&e, "identities_pkey") => continue,
             result => return Ok(Json(result?)),
         }
     }
 }
 
-async fn sign_in(state: &AppState, identity: &VerifiedIdentity) -> Result<Session, sqlx::Error> {
+async fn sign_in(
+    state: &AppState,
+    identity: &VerifiedIdentity,
+    device: Option<&Device>,
+) -> Result<Session, sqlx::Error> {
     let mut tx = state.db.begin().await?;
     let new_user = Uuid::now_v7();
     // Upsert keyed on (provider, subject); the insert into users only happens
@@ -92,7 +152,7 @@ async fn sign_in(state: &AppState, identity: &VerifiedIdentity) -> Result<Sessio
     .fetch_one(&mut *tx)
     .await?;
 
-    let session = start_session(state, &mut tx, user_id, Uuid::now_v7()).await?;
+    let session = start_session(state, &mut tx, user_id, Uuid::now_v7(), device).await?;
     tx.commit().await?;
     Ok(session)
 }
@@ -137,7 +197,7 @@ pub async fn refresh(
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    let session = start_session(&state, &mut tx, user_id, family).await?;
+    let session = start_session(&state, &mut tx, user_id, family, None).await?;
     tx.commit().await?;
     Ok(Json(session))
 }
@@ -160,48 +220,27 @@ pub async fn logout(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Serialize)]
-pub struct Me {
-    user_id: Uuid,
-    username: Option<String>,
-    identities: Vec<LinkedIdentity>,
-}
-
-#[derive(Serialize, sqlx::FromRow)]
-pub struct LinkedIdentity {
-    provider: String,
-    email: Option<String>,
-}
-
-pub async fn me(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<Json<Me>> {
-    let user: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT p.username FROM users u LEFT JOIN password_credentials p ON p.user_id = u.id WHERE u.id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.db)
-    .await?;
-    let Some((username,)) = user else {
-        return Err(ApiError::NotFound);
-    };
-    let identities = sqlx::query_as::<_, LinkedIdentity>(
-        "SELECT provider, email FROM identities WHERE user_id = $1 ORDER BY created_at",
-    )
-    .bind(user_id)
-    .fetch_all(&state.db)
-    .await?;
-    Ok(Json(Me {
-        user_id,
-        username,
-        identities,
-    }))
-}
-
 pub(super) async fn start_session(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     user_id: Uuid,
     family: Uuid,
+    device: Option<&Device>,
 ) -> Result<Session, sqlx::Error> {
+    // A new sign-in records the device; a refresh only marks it used.
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (family_id, user_id, device_name, platform) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (family_id) DO UPDATE SET last_used_at = now()
+        "#,
+    )
+    .bind(family)
+    .bind(user_id)
+    .bind(device.and_then(Device::clean_name))
+    .bind(device.and_then(|d| d.platform).map(Platform::as_str))
+    .execute(&mut *tx)
+    .await?;
+
     let refresh_token = new_refresh_token();
     sqlx::query(
         r#"
@@ -220,7 +259,7 @@ pub(super) async fn start_session(
     let now = jsonwebtoken::get_current_timestamp() as i64;
     Ok(Session {
         user_id,
-        access_token: state.tokens.issue_access(user_id, now),
+        access_token: state.tokens.issue_access(user_id, family, now),
         token_type: "Bearer",
         expires_in: ACCESS_TTL_SECS,
         refresh_token,

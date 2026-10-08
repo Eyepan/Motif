@@ -327,6 +327,406 @@ async fn password_accounts() {
 }
 
 #[tokio::test]
+async fn account_details_devices_and_deletion() {
+    let Some(app) = app().await else { return };
+    let name = format!("acct-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let url = format!("/v1/auth/username?username={}", name.to_uppercase());
+    let (status, check) = call(&app, "GET", &url, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{check}");
+    assert_eq!(check, json!({"username": name, "available": true}));
+    let (status, _) = call(&app, "GET", "/v1/auth/username?username=a%20b", None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, phone) = call(
+        &app,
+        "POST",
+        "/v1/auth/register",
+        None,
+        Some(json!({
+            "username": name, "password": "correct horse",
+            "device": {"name": "  Pan's iPhone\n ", "platform": "ios"}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{phone}");
+    let (_, check) = call(&app, "GET", &url, None, None).await;
+    assert_eq!(check["available"], false);
+    let (status, mac) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({
+            "username": name, "password": "correct horse",
+            "device": {"name": "Studio Mac", "platform": "visionos"}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mac}");
+    let phone_token = phone["access_token"].as_str();
+
+    // Account details: display name set, cleared, left alone.
+    let (status, me) = call(&app, "GET", "/v1/me", phone_token, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["display_name"], Value::Null);
+    assert!(me["created_at_ms"].as_i64().unwrap() > 1_577_836_800_000);
+    let (status, me) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"display_name": "  Pan "})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["display_name"], "Pan");
+    let renamed = format!("{name}-dj");
+    let (status, me) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"username": renamed})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["username"], renamed);
+    assert_eq!(me["display_name"], "Pan");
+    let (_, me) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"display_name": null})),
+    )
+    .await;
+    assert_eq!(me["display_name"], Value::Null);
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"display_name": "x".repeat(65)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let other = format!("other-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/register",
+        None,
+        Some(json!({"username": other, "password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"username": other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Signed-in devices, from the phone's point of view.
+    let (status, list) = call(&app, "GET", "/v1/sessions", phone_token, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let sessions = list["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "{list}");
+    let this = sessions.iter().find(|s| s["current"] == true).unwrap();
+    assert_eq!(this["device_name"], "Pan's iPhone");
+    assert_eq!(this["platform"], "ios");
+    let studio = sessions.iter().find(|s| s["current"] == false).unwrap();
+    assert_eq!(studio["device_name"], "Studio Mac");
+    assert_eq!(studio["platform"], "other");
+
+    // A refresh keeps the device and its place in the list.
+    let (status, phone2) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": phone["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = call(
+        &app,
+        "GET",
+        "/v1/sessions",
+        phone2["access_token"].as_str(),
+        None,
+    )
+    .await;
+    assert_eq!(list["sessions"].as_array().unwrap().len(), 2);
+    assert_eq!(list["sessions"][0]["current"], true, "{list}");
+    assert_eq!(list["sessions"][0]["id"], this["id"]);
+
+    // Signing out one device stops its refresh token.
+    let path = format!("/v1/sessions/{}", studio["id"].as_str().unwrap());
+    let (status, _) = call(&app, "DELETE", &path, phone_token, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": mac["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Sign out everything else: two more sign-ins go, the phone stays.
+    for _ in 0..2 {
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(json!({"username": renamed, "password": "correct horse"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, out) = call(&app, "DELETE", "/v1/sessions", phone_token, None).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["signed_out"], 2);
+    let (_, list) = call(&app, "GET", "/v1/sessions", phone_token, None).await;
+    assert_eq!(list["sessions"].as_array().unwrap().len(), 1);
+
+    // Changing the password keeps this device's name on the new sign-in.
+    let (status, changed) = call(
+        &app,
+        "POST",
+        "/v1/auth/password",
+        phone_token,
+        Some(json!({"current_password": "wrong horse", "new_password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{changed}");
+    let (status, changed) = call(
+        &app,
+        "POST",
+        "/v1/auth/password",
+        phone_token,
+        Some(json!({"current_password": "correct horse", "new_password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let token = changed["access_token"].as_str();
+    let (_, list) = call(&app, "GET", "/v1/sessions", token, None).await;
+    assert_eq!(list["sessions"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["sessions"][0]["device_name"], "Pan's iPhone");
+    assert_eq!(list["sessions"][0]["current"], true);
+
+    // Deleting the account needs the password and removes the history.
+    let (status, res) = call(
+        &app,
+        "POST",
+        "/v1/events",
+        token,
+        Some(json!({"events": [play("phone")]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    let (status, _) = call(&app, "DELETE", "/v1/me", token, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/v1/me",
+        token,
+        Some(json!({"password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/v1/me",
+        token,
+        Some(json!({"password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(&app, "GET", "/v1/me", token, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/events",
+        token,
+        Some(json!({"events": [play("phone")]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": changed["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({"username": renamed, "password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, check) = call(
+        &app,
+        "GET",
+        &format!("/v1/auth/username?username={renamed}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(check["available"], true);
+}
+
+fn event_at(kind: &str, device: &str, at_ms: i64) -> Value {
+    let mut e = play(device);
+    e["type"] = json!(kind);
+    e["at_ms"] = json!(at_ms);
+    e
+}
+
+#[tokio::test]
+async fn listening_history_reads_summarizes_and_deletes() {
+    let Some(app) = app().await else { return };
+    let session = sign_in(&app, &format!("history-{}", Uuid::new_v4())).await;
+    let token = session["access_token"].as_str();
+    let day = 86_400_000i64;
+    let t0 = 1_790_000_000_000i64;
+    let mut events: Vec<Value> = (0..5)
+        .map(|i| event_at("play", "phone", t0 + i * day))
+        .collect();
+    events.push(event_at("transition", "mac", t0 + day + 1));
+    events.push(event_at("crate_changed", "mac", t0 + day + 2));
+    let (status, res) = call(
+        &app,
+        "POST",
+        "/v1/events",
+        token,
+        Some(json!({"events": events})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    assert_eq!(res["inserted"], 7);
+
+    // Newest first, plays only by default, paged.
+    let (status, page) = call(&app, "GET", "/v1/history?limit=3", token, None).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let at: Vec<i64> = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["at_ms"].as_i64().unwrap())
+        .collect();
+    assert_eq!(at, vec![t0 + 4 * day, t0 + 3 * day, t0 + 2 * day]);
+    let next = format!(
+        "/v1/history?limit=3&before={}",
+        page["next_cursor"].as_str().unwrap()
+    );
+    let (_, page) = call(&app, "GET", &next, token, None).await;
+    assert_eq!(page["events"].as_array().unwrap().len(), 2);
+    assert!(page.get("next_cursor").is_none(), "{page}");
+    let (_, page) = call(
+        &app,
+        "GET",
+        "/v1/history?types=play,transition",
+        token,
+        None,
+    )
+    .await;
+    assert_eq!(page["events"].as_array().unwrap().len(), 6);
+    let (status, _) = call(&app, "GET", "/v1/history?types=crate_changed", token, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, summary) = call(&app, "GET", "/v1/history/summary", token, None).await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(summary["events"], 7);
+    assert_eq!(summary["plays"], 5);
+    assert_eq!(summary["listened_ms"], 5 * 212_000);
+    assert_eq!(summary["first_at_ms"], t0);
+    assert_eq!(summary["devices"].as_array().unwrap().len(), 2);
+    assert!(summary["bytes"].as_i64().unwrap() > 0);
+
+    // Deleting days 1-2 takes the plays and the transition, not the crate edit.
+    let (status, deleted) = call(
+        &app,
+        "DELETE",
+        "/v1/history",
+        token,
+        Some(json!({"from_ms": t0 + day, "to_ms": t0 + 3 * day})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert_eq!(deleted["deleted"], 3);
+    let (_, page) = call(
+        &app,
+        "GET",
+        "/v1/history?types=play,transition",
+        token,
+        None,
+    )
+    .await;
+    assert_eq!(page["events"].as_array().unwrap().len(), 3);
+
+    // Other devices learn about it from the log.
+    let (_, pulled) = call(&app, "GET", "/v1/events", token, None).await;
+    let pulled = pulled["events"].as_array().unwrap();
+    assert!(pulled.iter().any(|e| e["type"] == "crate_changed"));
+    let tomb = pulled
+        .iter()
+        .find(|e| e["type"] == "history_deleted")
+        .unwrap();
+    assert_eq!(tomb["id"], deleted["tombstone_id"]);
+    assert_eq!(tomb["payload"]["from_ms"], t0 + day);
+
+    // An offline device uploading its copy later does not bring them back,
+    // but new listening outside the range still lands.
+    let late = json!({"events": [
+        event_at("play", "tablet", t0 + day + 5),
+        event_at("play", "tablet", t0 + 4 * day + 5),
+    ]});
+    let (_, res) = call(&app, "POST", "/v1/events", token, Some(late)).await;
+    assert_eq!(res["inserted"], 1, "{res}");
+    assert_eq!(res["duplicates"], 1, "{res}");
+    // Clients cannot write tombstones themselves.
+    let fake = json!({"events": [event_at("history_deleted", "phone", t0)]});
+    let (_, res) = call(&app, "POST", "/v1/events", token, Some(fake)).await;
+    assert_eq!(res["rejected"].as_array().unwrap().len(), 1, "{res}");
+
+    // Delete everything; a range in the future is refused.
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/v1/history",
+        token,
+        Some(json!({"from_ms": 4_000_000_000_000i64})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, all) = call(&app, "DELETE", "/v1/history", token, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{all}");
+    assert_eq!(all["deleted"], 4);
+    let (_, summary) = call(&app, "GET", "/v1/history/summary", token, None).await;
+    assert_eq!(summary["plays"], 0);
+    assert_eq!(
+        summary["events"], 3,
+        "crate edit and two tombstones remain: {summary}"
+    );
+}
+
+#[tokio::test]
 async fn repeated_wrong_passwords_lock_the_username() {
     let Some(app) = app().await else { return };
     let name = format!("lock-{}", &Uuid::new_v4().simple().to_string()[..8]);

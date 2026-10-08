@@ -49,20 +49,36 @@ The project owner does this once (steps in `server/README.md`): import the repo 
 
 During a rollout, instances of the previous deployment keep serving after the new one has migrated, so for a short time old code runs on the new schema and possibly new code on the old one. Migrations therefore stay additive: add a column or table in one release, start using it, and remove the old one in a later release.
 
+The migrator ignores migrations in the database that the running build does not know, so older code keeps starting against a newer schema. This matters beyond rollouts: when previews have no Neon branch of their own, every PR preview migrates the production database as soon as it deploys. Two rules follow:
+
+- **Never edit a migration after it has been pushed.** A preview may already have applied it, and every deployment checks applied migrations against their checksums and refuses to start on a mismatch. Fix a pushed migration with a new one.
+- Keep migrations additive, so production code is unaffected by tables and columns a preview added.
+
+(On 2026-10-08 a PR preview applied a new migration to the shared database; production, which did not yet ignore unknown migrations, then refused to start until the change shipped.)
+
 ## API
 
 Full contract: `schemas/api/openapi.yaml`. All bodies are JSON; errors are `{"error": {"code", "message"}}`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /health` | Liveness plus a database round trip; 503 when the database is down |
+| `GET /health` | Liveness plus a database round trip and the serving region; 503 when the database is down |
 | `POST /v1/auth/register` | Create an account with a username and password; returns a session |
 | `POST /v1/auth/login` | Sign in with a username and password |
 | `POST /v1/auth/password` | Change the password; signs out every other device |
 | `POST /v1/auth/token` | Exchange an Apple or Google ID token for a session; off unless configured |
 | `POST /v1/auth/refresh` | Rotate the refresh token |
 | `POST /v1/auth/logout` | Revoke this device's session |
-| `GET /v1/me` | The account and its linked sign-in methods |
+| `GET /v1/auth/username?username=` | Sign-up form check: is the username valid and free |
+| `GET /v1/me` | Account details: username, display name, member since, linked sign-in methods |
+| `PATCH /v1/me` | Change the username or display name |
+| `DELETE /v1/me` | Delete the account and its synced history; needs the password |
+| `GET /v1/sessions` | Devices signed in to the account, with "this device" marked |
+| `DELETE /v1/sessions/{id}` | Sign one device out |
+| `DELETE /v1/sessions` | Sign out every other device |
+| `GET /v1/history?before=&limit=&types=` | Listening history newest first, for the history screen |
+| `GET /v1/history/summary` | What the server holds: plays, listening time, devices, storage used |
+| `DELETE /v1/history` | Delete listening history in a time range, or all of it |
 | `POST /v1/events` | Upload a batch of history events, idempotent on event id |
 | `GET /v1/events?after=&limit=&exclude_device=` | Pull events in server arrival order |
 
@@ -74,12 +90,17 @@ Accounts are a username and a password. Nothing costs money and nothing depends 
 - **Passwords** are at least 8 characters, hashed with Argon2id (19 MiB, 2 passes, the OWASP baseline) on a blocking thread so hashing never stalls other requests. Only the hash is stored.
 - **Login** answers "invalid username or password" for both an unknown username and a wrong password, and spends the same hashing time on both, so it does not reveal which usernames exist. Ten wrong passwords in a row lock that username for 15 minutes.
 - **No email, so no reset.** A forgotten password cannot be recovered. Nothing is lost: the history stays on each device and uploads again to a new account. Changing the password (while signed in) signs out every other device.
+- **Account details**: a changeable username and an optional display name (up to 64 characters, any script). Member since comes from the account's creation time.
+- **Deleting the account** needs the password, then deletes the user and, by cascade, their synced history, sign-ins and devices. Nothing on the devices is touched; the app goes back to working signed out. App Store review requires this for any app that creates accounts.
+- **Settings that sync** across devices travel as events in the history log, like crates (decision 3 below), so there is no settings endpoint. Device-only settings (audio output, cache size) stay on the device.
+- **Wrong password while signed in** (changing the password, deleting the account) is 403, not 401, so a client never mistakes it for an expired token and refreshes.
 - **Apple and Google sign-in** are still in the server (`POST /v1/auth/token`, verifying ID tokens against the providers' published keys), switched off until `MOTIF_APPLE_AUDIENCES` or `MOTIF_GOOGLE_CLIENT_IDS` is set. They are free to use if wanted later. Linking them to an existing username account is not built yet; today each would create its own account.
 
 Every sign-in method ends in the same session:
 
 - **Access token**: an HS256 JWT signed with `MOTIF_JWT_SECRET`, valid 15 minutes, checked without a database lookup.
 - **Refresh token**: 256 random bits, stored only as a SHA-256 hash, valid 90 days, rotated on every use. Presenting a token that was already rotated signs out that whole sign-in (it was probably copied), except within 60 seconds of the rotation, which covers an app retrying after a dropped response.
+- **Signed-in devices**: every sign-in (one refresh token family) may carry `device: {name, platform}`, stored in `sessions` and listed by `GET /v1/sessions`. The access token carries the sign-in's id (`sid`), so the list marks the caller's own device and "sign out every other device" keeps it. Signing a device out revokes its refresh token at once; its access token still works for up to 15 minutes, which is the price of checking access tokens without a database lookup. Changing the password keeps the device's name on its new sign-in.
 - `provider: "dev"` accepts any subject, for local development and tests. It is off unless `MOTIF_DEV_AUTH=1`, and the server refuses to start with it on in a Vercel production deployment.
 
 ### History sync
@@ -90,11 +111,19 @@ This implements the sync section of docs/analytics.md.
 - **Pull** pages by server arrival order (`seq`), not by event time. A phone that was offline for a week uploads old events late; a time-based cursor on the Mac would skip them, an arrival cursor does not. Uploads for one user take a per-user advisory lock, so that user's `seq` values become visible strictly in order and a cursor never jumps past a transaction that commits later. Cursors are opaque strings; the device stores the last `next_cursor` and pulls until `has_more` is false. `exclude_device` skips the caller's own events.
 - **Validation** is on the envelope only: UUIDv7 id, snake_case `type`, `v ≥ 1`, sane `at_ms` and `tz_min`, a JSON object payload of at most 16 KiB. Payloads are stored as `jsonb` without interpreting them, so a new event type or payload version needs no server change. Unknown envelope fields, such as the device's local `synced` flag, are ignored.
 
+### Listening history screen
+
+Each device holds the whole merged log once it has pulled it, so the history screen normally reads the local `history.db`. The server adds three things the device cannot do alone:
+
+- **Newest-first reading** (`GET /v1/history`), ordered by when listening happened, so a newly signed-in device shows history before its pull finishes. Defaults to plays; `types` adds transitions, app sessions or searches.
+- **A summary** (`GET /v1/history/summary`) of what is synced: plays, total listening time, first and last listen, storage used, and each device's event count and last upload. Together with `/health` (status, version, region) this fills the server details screen.
+- **Deleting history** (`DELETE /v1/history`, docs/analytics.md Privacy controls). It removes `play`, `transition`, `app_session` and `search` events in `[from_ms, to_ms)`, or all of them. Library events (tracks, likes, crates) are state rather than history and stay, so deleting a month of plays does not undo that month's crate edits. The end of the range is clamped to now. The server records the range and appends a `history_deleted` event (`schemas/events/history_deleted.v1.schema.json`); other devices pull it and delete their local copies, unsynced ones included. A device that was offline and uploads deleted events later gets them acknowledged as duplicates and dropped, so deleted history never comes back. Clients cannot upload `history_deleted` themselves.
+
 ## How the apps connect
 
 Recommended: **a native client on each platform, written against the OpenAPI contract**, not a shared Rust client.
 
-The API is ten small JSON endpoints. The hard parts of the client are platform parts: background scheduling, secure token storage, native sign-in and system networking. A Rust client would still need all of those from each platform, and would add a second HTTP and TLS stack next to URLSession and OkHttp.
+The API is about fifteen small JSON endpoints. The hard parts of the client are platform parts: background scheduling, secure token storage, native sign-in and system networking. A Rust client would still need all of those from each platform, and would add a second HTTP and TLS stack next to URLSession and OkHttp.
 
 | | Apple (MotifKit) | Android |
 | --- | --- | --- |
@@ -126,7 +155,5 @@ Everything fits in free plans for a personal project:
 
 ## Not built yet
 
-- **Account deletion** (`DELETE /v1/me`): required by App Store review for any app that creates accounts. Deletes the user and, by cascade, their events and tokens.
-- **History deletion** (`DELETE /v1/events?from_ms&to_ms`, docs/analytics.md Privacy controls): needs a tombstone so other devices learn about the deletion on their next pull.
 - **Rate limiting**: Vercel's firewall rules first; per-user limits in the server if needed.
 - **Recap on the server**: not needed while each device holds the full log and runs `core/recap`. Because the server is Rust, it can link `core/recap` later for things like shareable recap pages.

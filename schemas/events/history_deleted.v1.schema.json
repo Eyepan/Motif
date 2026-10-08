@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motif.app/schemas/events/history_deleted.v1.schema.json",
+  "title": "history_deleted v1",
+  "description": "Written only by the server (device_id \"server\") when the user deletes listening history with DELETE /v1/history. A device that pulls it deletes its local events of the listed types with from_ms <= at_ms < to_ms, including unsynced ones, and keeps this event.",
+  "type": "object",
+  "required": ["from_ms", "to_ms", "types"],
+  "properties": {
+    "from_ms": { "type": "integer" },
+    "to_ms": { "type": "integer" },
+    "types": {
+      "type": "array", "uniqueItems": true,
+      "description": "Event types removed: play, transition, app_session, search.",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true
+}

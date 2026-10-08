@@ -8,9 +8,9 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use super::auth::{Session, is_constraint, start_session};
+use super::auth::{Device, Platform, Session, is_constraint, start_session};
 use crate::AppState;
-use crate::auth::AuthUser;
+use crate::auth::AuthSession;
 use crate::auth::password;
 use crate::error::{ApiError, ApiResult};
 
@@ -23,6 +23,8 @@ const INVALID_LOGIN: &str = "invalid username or password";
 pub struct Credentials {
     username: String,
     password: String,
+    #[serde(default)]
+    device: Option<Device>,
 }
 
 #[derive(Deserialize)]
@@ -60,7 +62,14 @@ pub async fn register(
             e.into()
         }
     })?;
-    let session = start_session(&state, &mut tx, user_id, Uuid::now_v7()).await?;
+    let session = start_session(
+        &state,
+        &mut tx,
+        user_id,
+        Uuid::now_v7(),
+        req.device.as_ref(),
+    )
+    .await?;
     tx.commit().await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
@@ -119,7 +128,14 @@ pub async fn login(
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    let session = start_session(&state, &mut tx, user_id, Uuid::now_v7()).await?;
+    let session = start_session(
+        &state,
+        &mut tx,
+        user_id,
+        Uuid::now_v7(),
+        req.device.as_ref(),
+    )
+    .await?;
     tx.commit().await?;
     Ok(Json(session))
 }
@@ -127,9 +143,10 @@ pub async fn login(
 /// Changes the password and signs out every other device.
 pub async fn change(
     State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
+    AuthSession(access): AuthSession,
     Json(req): Json<ChangePassword>,
 ) -> ApiResult<Json<Session>> {
+    let user_id = access.user;
     password::check_password(&req.new_password).map_err(bad_request)?;
     let stored: Option<String> =
         sqlx::query_scalar("SELECT password_hash FROM password_credentials WHERE user_id = $1")
@@ -140,9 +157,14 @@ pub async fn change(
         return Err(ApiError::BadRequest("this account has no password".into()));
     };
     if !verify_blocking(req.current_password, stored).await? {
-        return Err(ApiError::Unauthorized("current password is wrong"));
+        return Err(ApiError::Forbidden("current password is wrong"));
     }
     let hash = hash_blocking(req.new_password).await?;
+    // The new sign-in replaces this device's old one; keep its name.
+    let device = match access.session {
+        Some(family) => current_device(&state, family).await?,
+        None => None,
+    };
 
     let mut tx = state.db.begin().await?;
     sqlx::query(
@@ -158,22 +180,34 @@ pub async fn change(
     .bind(user_id)
     .execute(&mut *tx)
     .await?;
-    let session = start_session(&state, &mut tx, user_id, Uuid::now_v7()).await?;
+    let session = start_session(&state, &mut tx, user_id, Uuid::now_v7(), device.as_ref()).await?;
     tx.commit().await?;
     Ok(Json(session))
+}
+
+async fn current_device(state: &AppState, family: Uuid) -> ApiResult<Option<Device>> {
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT device_name, platform FROM sessions WHERE family_id = $1")
+            .bind(family)
+            .fetch_optional(&state.db)
+            .await?;
+    Ok(row.map(|(name, platform)| Device {
+        name,
+        platform: platform.and_then(|p| serde_json::from_value::<Platform>(p.into()).ok()),
+    }))
 }
 
 fn bad_request(message: &'static str) -> ApiError {
     ApiError::BadRequest(message.into())
 }
 
-async fn hash_blocking(pw: String) -> ApiResult<String> {
+pub(super) async fn hash_blocking(pw: String) -> ApiResult<String> {
     tokio::task::spawn_blocking(move || password::hash(&pw))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
-async fn verify_blocking(pw: String, stored: String) -> ApiResult<bool> {
+pub(super) async fn verify_blocking(pw: String, stored: String) -> ApiResult<bool> {
     tokio::task::spawn_blocking(move || password::verify(&pw, &stored))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))
