@@ -1,6 +1,5 @@
--- Account management: a display name, a row per signed-in device so
--- Settings can list devices and sign them out, and deleted listening history.
--- Additive only.
+-- Account management: a display name, and a row per signed-in device so
+-- Settings can list devices and sign them out. Additive only.
 
 ALTER TABLE users ADD COLUMN display_name TEXT;
 
@@ -15,17 +14,3 @@ CREATE TABLE sessions (
     last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()    -- last sign-in or refresh
 );
 CREATE INDEX sessions_user ON sessions(user_id);
-
--- Listening history the user deleted (docs/analytics.md, Privacy controls).
--- Events of the listening types with at_ms in [from_ms, to_ms) are removed,
--- and later uploads of such events are dropped, so a device that was offline
--- cannot bring them back. Each row is also a `history_deleted` event in the
--- log with the same id, which tells the other devices to delete them locally.
-CREATE TABLE history_deletions (
-    id          UUID PRIMARY KEY,
-    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    from_ms     BIGINT NOT NULL,
-    to_ms       BIGINT NOT NULL,
-    deleted_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX history_deletions_user ON history_deletions(user_id);

@@ -19,7 +19,14 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 pub use config::Config;
 
-pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+/// Tolerates migrations in the database that this build does not know. During
+/// a rollout, and whenever a preview deployment shares the database, older
+/// code runs against a newer schema; migrations are additive, so that works,
+/// and refusing to start would take the older deployment down.
+pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate::Migrator {
+    ignore_missing: true,
+    ..sqlx::migrate!("./migrations")
+};
 
 /// Applies pending migrations over a direct connection. Migrations hold a
 /// session-level advisory lock, which a transaction-mode pooler does not keep,

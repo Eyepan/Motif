@@ -49,6 +49,13 @@ The project owner does this once (steps in `server/README.md`): import the repo 
 
 During a rollout, instances of the previous deployment keep serving after the new one has migrated, so for a short time old code runs on the new schema and possibly new code on the old one. Migrations therefore stay additive: add a column or table in one release, start using it, and remove the old one in a later release.
 
+The migrator ignores migrations in the database that the running build does not know, so older code keeps starting against a newer schema. This matters beyond rollouts: when previews have no Neon branch of their own, every PR preview migrates the production database as soon as it deploys. Two rules follow:
+
+- **Never edit a migration after it has been pushed.** A preview may already have applied it, and every deployment checks applied migrations against their checksums and refuses to start on a mismatch. Fix a pushed migration with a new one.
+- Keep migrations additive, so production code is unaffected by tables and columns a preview added.
+
+(On 2026-10-08 a PR preview applied a new migration to the shared database; production, which did not yet ignore unknown migrations, then refused to start until the change shipped.)
+
 ## API
 
 Full contract: `schemas/api/openapi.yaml`. All bodies are JSON; errors are `{"error": {"code", "message"}}`.
