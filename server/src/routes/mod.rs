@@ -2,6 +2,7 @@ mod account;
 mod auth;
 mod events;
 mod health;
+mod history;
 mod password;
 
 use axum::Router;
@@ -38,6 +39,8 @@ pub fn router() -> Router<AppState> {
         )
         .route("/v1/sessions/{id}", delete(account::delete_session))
         .route("/v1/events", post(events::upload).get(events::pull))
+        .route("/v1/history", get(history::read).delete(history::delete))
+        .route("/v1/history/summary", get(history::summary))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())
 }

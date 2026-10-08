@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use super::history::{HISTORY_DELETED, HISTORY_TYPES};
 use crate::AppState;
 use crate::auth::AuthUser;
 use crate::error::{ApiError, ApiResult};
@@ -18,7 +19,7 @@ pub const MAX_PAYLOAD_BYTES: usize = 16 * 1024;
 const DEFAULT_PULL: i64 = 500;
 const MAX_PULL: i64 = 1000;
 /// 2020-01-01, earlier than any Motif event can be.
-const MIN_AT_MS: i64 = 1_577_836_800_000;
+pub(super) const MIN_AT_MS: i64 = 1_577_836_800_000;
 /// Device clocks drift; anything further ahead than this is a broken clock.
 const MAX_FUTURE_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
@@ -116,8 +117,14 @@ async fn insert(state: &AppState, user_id: Uuid, events: &[Event]) -> ApiResult<
     let result = sqlx::query(
         r#"
         INSERT INTO events (user_id, id, type, v, at_ms, tz_min, device_id, session_id, track_id, track_key, payload)
-        SELECT $1, * FROM UNNEST($2::uuid[], $3::text[], $4::int[], $5::bigint[], $6::int[], $7::text[],
-                                 $8::text[], $9::text[], $10::text[], $11::jsonb[])
+        SELECT $1, e.* FROM UNNEST($2::uuid[], $3::text[], $4::int[], $5::bigint[], $6::int[], $7::text[],
+                                   $8::text[], $9::text[], $10::text[], $11::jsonb[])
+            AS e(id, type, v, at_ms, tz_min, device_id, session_id, track_id, track_key, payload)
+        -- History the user deleted stays deleted when an offline device uploads
+        -- its copy later; those count as duplicates so the device marks them synced.
+        WHERE NOT (e.type = ANY($12) AND EXISTS (
+            SELECT 1 FROM history_deletions d
+            WHERE d.user_id = $1 AND e.at_ms >= d.from_ms AND e.at_ms < d.to_ms))
         ON CONFLICT (user_id, id) DO NOTHING
         "#,
     )
@@ -132,6 +139,7 @@ async fn insert(state: &AppState, user_id: Uuid, events: &[Event]) -> ApiResult<
     .bind(col(|e| e.track_id.clone()))
     .bind(col(|e| e.track_key.clone()))
     .bind(events.iter().map(|e| e.payload.clone()).collect::<Vec<_>>())
+    .bind(HISTORY_TYPES)
     .execute(&mut *tx)
     .await
     .map_err(|e| {
@@ -158,6 +166,9 @@ fn validate(e: Event, now_ms: i64) -> Result<Event, String> {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
     if !type_ok {
         return Err("type must be snake_case, at most 64 characters".into());
+    }
+    if e.kind == HISTORY_DELETED {
+        return Err("history_deleted is written by the server; use DELETE /v1/history".into());
     }
     if e.v < 1 {
         return Err("v must be at least 1".into());
@@ -266,7 +277,7 @@ fn decode_cursor(cursor: &str) -> Option<i64> {
     (seq >= 0).then_some(seq)
 }
 
-fn now_ms() -> i64 {
+pub(super) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)

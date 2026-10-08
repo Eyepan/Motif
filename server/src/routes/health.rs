@@ -21,6 +21,8 @@ pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<Value>) 
         "status": if db_ok { "ok" } else { "degraded" },
         "version": env!("CARGO_PKG_VERSION"),
         "database": if db_ok { "ok" } else { "unreachable" },
+        // Set by Vercel (e.g. "sin1"); absent when running elsewhere.
+        "region": std::env::var("VERCEL_REGION").ok(),
     });
     (status, Json(body))
 }

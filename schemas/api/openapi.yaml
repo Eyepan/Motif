@@ -4,7 +4,7 @@
 openapi: 3.1.0
 info:
   title: Motif sync API
-  version: 0.3.0
+  version: 0.4.0
 servers:
   - url: http://localhost:8080
     description: motif-server on a developer machine
@@ -101,6 +101,88 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/RefreshRequest" } } }
       responses:
         "204": { description: Signed out (also when the token was unknown) }
+  /v1/history:
+    get:
+      summary: Listening history, newest first
+      description: For the history screen on a device that has not finished pulling the log yet. Ordered by when it happened (at_ms), not arrival.
+      parameters:
+        - { name: before, in: query, schema: { type: string }, description: next_cursor from the previous page }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: types, in: query, schema: { type: string, default: play }, description: "Comma-separated, from play, transition, app_session, search" }
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events: { type: array, items: { $ref: "#/components/schemas/Event" } }
+                  next_cursor: { type: string, description: Absent on the last page }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Delete listening history in a time range
+      description: >-
+        Deletes play, transition, app_session and search events with from_ms <= at_ms < to_ms (both optional; none deletes all history).
+        Library events (tracks, likes, crates) are kept. to_ms is clamped to now. Later uploads of deleted events are acknowledged as
+        duplicates and dropped. The server appends a history_deleted event (schemas/events/history_deleted.v1.schema.json) that other
+        devices pull and apply locally; the calling device deletes its own copies itself.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from_ms: { type: integer, format: int64 }
+                to_ms: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, from_ms, to_ms, tombstone_id]
+                properties:
+                  deleted: { type: integer }
+                  from_ms: { type: integer, format: int64 }
+                  to_ms: { type: integer, format: int64 }
+                  tombstone_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/history/summary:
+    get:
+      summary: What the server holds for this account
+      description: For the history and server details screens.
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events, plays, listened_ms, bytes, devices]
+                properties:
+                  events: { type: integer, description: All events of any type }
+                  plays: { type: integer }
+                  listened_ms: { type: integer, format: int64, description: Sum of listened_ms over plays }
+                  first_at_ms: { type: [integer, "null"], format: int64 }
+                  last_at_ms: { type: [integer, "null"], format: int64 }
+                  last_upload_at_ms: { type: [integer, "null"], format: int64 }
+                  bytes: { type: integer, format: int64, description: Approximate storage used }
+                  devices:
+                    type: array
+                    items:
+                      type: object
+                      required: [device_id, events, last_upload_at_ms]
+                      properties:
+                        device_id: { type: string, description: The random per-install id from the events }
+                        events: { type: integer }
+                        last_upload_at_ms: { type: integer, format: int64 }
+        "401": { $ref: "#/components/responses/Error" }
   /v1/auth/username:
     get:
       summary: Check a username while signing up
@@ -282,6 +364,7 @@ components:
         status: { type: string, enum: [ok, degraded] }
         version: { type: string }
         database: { type: string, enum: [ok, unreachable] }
+        region: { type: [string, "null"], description: "Vercel region serving the request, e.g. sin1; null elsewhere" }
     Credentials:
       type: object
       required: [username, password]
