@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     sample_rate     INTEGER,
     bit_depth       INTEGER,
     channels        INTEGER,
-    source          TEXT NOT NULL,             -- local | internet_archive | jamendo | bandcamp
+    source          TEXT NOT NULL,             -- local | internet_archive | jamendo | audius | bandcamp
     source_ref      TEXT,                      -- id in the source catalog
     license_url     TEXT,
     bpm             REAL,                      -- filled by core/dsp analysis

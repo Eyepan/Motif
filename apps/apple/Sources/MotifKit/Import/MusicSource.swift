@@ -17,10 +17,13 @@ public struct SourceResult: Identifiable, Hashable, Sendable {
     public let licenseURL: URL?
     /// The release's cover image, used as art when the files have none embedded.
     public let coverURL: URL?
+    /// What the download will be, when the catalog says: "flac", "wav", "mp3".
+    public let format: String?
 
-    public init(id: String, title: String, artist: String?, album: String?, licenseURL: URL?, coverURL: URL? = nil) {
+    public init(id: String, title: String, artist: String?, album: String?, licenseURL: URL?, coverURL: URL? = nil,
+                format: String? = nil) {
         self.id = id; self.title = title; self.artist = artist; self.album = album; self.licenseURL = licenseURL
-        self.coverURL = coverURL
+        self.coverURL = coverURL; self.format = format
     }
 }
 

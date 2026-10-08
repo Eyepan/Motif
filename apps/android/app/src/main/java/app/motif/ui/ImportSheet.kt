@@ -71,7 +71,7 @@ fun ImportSheet(app: MotifApp, onDismiss: () -> Unit, onDiscover: () -> Unit) {
                     SourceRow(Icons.Outlined.Folder, "Folder", "A whole folder, including SD cards and USB drives") {
                         pickFolder.launch(null)
                     }
-                    SourceRow(Icons.Outlined.Explore, "Discover", "Search and download free lossless music from Jamendo and the Internet Archive", onDiscover)
+                    SourceRow(Icons.Outlined.Explore, "Discover", "Search and download free music from Jamendo, the Internet Archive and Audius", onDiscover)
                 }
             }
 
