@@ -185,9 +185,8 @@ final class AppModel {
         crate.trackKeys.count - tracks(in: crate).count
     }
 
-    @discardableResult
-    func createCrate(named name: String, with tracks: [Track] = []) async -> String? {
-        await editCrates { try await crateStore.create(name: name, with: tracks) }
+    func createCrate(named name: String, with tracks: [Track] = []) async {
+        await editCrates { _ = try await crateStore.create(name: name, with: tracks) }
     }
 
     func renameCrate(_ crate: Crate, to name: String) async {
@@ -208,13 +207,10 @@ final class AppModel {
     }
 
     /// Runs an edit, then reloads crates, and tracks too, since adding a track can save its content hash.
-    @discardableResult
-    private func editCrates<T>(_ edit: () async throws -> T) async -> T? {
-        var result: T?
-        do { result = try await edit() } catch { errorMessage = error.localizedDescription }
+    private func editCrates(_ edit: () async throws -> Void) async {
+        do { try await edit() } catch { errorMessage = error.localizedDescription }
         await refresh()
         await refreshCrates()
-        return result
     }
 
     // MARK: - Import
