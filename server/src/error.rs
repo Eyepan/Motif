@@ -10,6 +10,8 @@ pub enum ApiError {
     BadRequest(String),
     #[error("{0}")]
     Unauthorized(&'static str),
+    #[error("{0}")]
+    Forbidden(&'static str),
     #[error("not found")]
     NotFound,
     #[error("{0}")]
@@ -27,6 +29,7 @@ impl ApiError {
         match self {
             ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
             ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             ApiError::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),

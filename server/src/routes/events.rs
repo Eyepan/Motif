@@ -133,7 +133,15 @@ async fn insert(state: &AppState, user_id: Uuid, events: &[Event]) -> ApiResult<
     .bind(col(|e| e.track_key.clone()))
     .bind(events.iter().map(|e| e.payload.clone()).collect::<Vec<_>>())
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(|e| {
+        // The account was deleted while this device still held an access token.
+        if super::auth::is_constraint(&e, "events_user_id_fkey") {
+            ApiError::Unauthorized("account no longer exists")
+        } else {
+            e.into()
+        }
+    })?;
     tx.commit().await?;
     Ok(result.rows_affected())
 }

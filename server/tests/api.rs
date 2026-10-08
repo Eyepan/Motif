@@ -327,6 +327,271 @@ async fn password_accounts() {
 }
 
 #[tokio::test]
+async fn account_details_devices_and_deletion() {
+    let Some(app) = app().await else { return };
+    let name = format!("acct-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let url = format!("/v1/auth/username?username={}", name.to_uppercase());
+    let (status, check) = call(&app, "GET", &url, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{check}");
+    assert_eq!(check, json!({"username": name, "available": true}));
+    let (status, _) = call(&app, "GET", "/v1/auth/username?username=a%20b", None, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, phone) = call(
+        &app,
+        "POST",
+        "/v1/auth/register",
+        None,
+        Some(json!({
+            "username": name, "password": "correct horse",
+            "device": {"name": "  Pan's iPhone\n ", "platform": "ios"}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{phone}");
+    let (_, check) = call(&app, "GET", &url, None, None).await;
+    assert_eq!(check["available"], false);
+    let (status, mac) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({
+            "username": name, "password": "correct horse",
+            "device": {"name": "Studio Mac", "platform": "visionos"}
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{mac}");
+    let phone_token = phone["access_token"].as_str();
+
+    // Account details: display name set, cleared, left alone.
+    let (status, me) = call(&app, "GET", "/v1/me", phone_token, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["display_name"], Value::Null);
+    assert!(me["created_at_ms"].as_i64().unwrap() > 1_577_836_800_000);
+    let (status, me) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"display_name": "  Pan "})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["display_name"], "Pan");
+    let renamed = format!("{name}-dj");
+    let (status, me) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"username": renamed})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["username"], renamed);
+    assert_eq!(me["display_name"], "Pan");
+    let (_, me) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"display_name": null})),
+    )
+    .await;
+    assert_eq!(me["display_name"], Value::Null);
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"display_name": "x".repeat(65)})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let other = format!("other-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/register",
+        None,
+        Some(json!({"username": other, "password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = call(
+        &app,
+        "PATCH",
+        "/v1/me",
+        phone_token,
+        Some(json!({"username": other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // Signed-in devices, from the phone's point of view.
+    let (status, list) = call(&app, "GET", "/v1/sessions", phone_token, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let sessions = list["sessions"].as_array().unwrap();
+    assert_eq!(sessions.len(), 2, "{list}");
+    let this = sessions.iter().find(|s| s["current"] == true).unwrap();
+    assert_eq!(this["device_name"], "Pan's iPhone");
+    assert_eq!(this["platform"], "ios");
+    let studio = sessions.iter().find(|s| s["current"] == false).unwrap();
+    assert_eq!(studio["device_name"], "Studio Mac");
+    assert_eq!(studio["platform"], "other");
+
+    // A refresh keeps the device and its place in the list.
+    let (status, phone2) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": phone["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = call(
+        &app,
+        "GET",
+        "/v1/sessions",
+        phone2["access_token"].as_str(),
+        None,
+    )
+    .await;
+    assert_eq!(list["sessions"].as_array().unwrap().len(), 2);
+    assert_eq!(list["sessions"][0]["current"], true, "{list}");
+    assert_eq!(list["sessions"][0]["id"], this["id"]);
+
+    // Signing out one device stops its refresh token.
+    let path = format!("/v1/sessions/{}", studio["id"].as_str().unwrap());
+    let (status, _) = call(&app, "DELETE", &path, phone_token, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": mac["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Sign out everything else: two more sign-ins go, the phone stays.
+    for _ in 0..2 {
+        let (status, _) = call(
+            &app,
+            "POST",
+            "/v1/auth/login",
+            None,
+            Some(json!({"username": renamed, "password": "correct horse"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, out) = call(&app, "DELETE", "/v1/sessions", phone_token, None).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["signed_out"], 2);
+    let (_, list) = call(&app, "GET", "/v1/sessions", phone_token, None).await;
+    assert_eq!(list["sessions"].as_array().unwrap().len(), 1);
+
+    // Changing the password keeps this device's name on the new sign-in.
+    let (status, changed) = call(
+        &app,
+        "POST",
+        "/v1/auth/password",
+        phone_token,
+        Some(json!({"current_password": "wrong horse", "new_password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{changed}");
+    let (status, changed) = call(
+        &app,
+        "POST",
+        "/v1/auth/password",
+        phone_token,
+        Some(json!({"current_password": "correct horse", "new_password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let token = changed["access_token"].as_str();
+    let (_, list) = call(&app, "GET", "/v1/sessions", token, None).await;
+    assert_eq!(list["sessions"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["sessions"][0]["device_name"], "Pan's iPhone");
+    assert_eq!(list["sessions"][0]["current"], true);
+
+    // Deleting the account needs the password and removes the history.
+    let (status, res) = call(
+        &app,
+        "POST",
+        "/v1/events",
+        token,
+        Some(json!({"events": [play("phone")]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{res}");
+    let (status, _) = call(&app, "DELETE", "/v1/me", token, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/v1/me",
+        token,
+        Some(json!({"password": "correct horse"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(
+        &app,
+        "DELETE",
+        "/v1/me",
+        token,
+        Some(json!({"password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(&app, "GET", "/v1/me", token, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/events",
+        token,
+        Some(json!({"events": [play("phone")]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/refresh",
+        None,
+        Some(json!({"refresh_token": changed["refresh_token"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = call(
+        &app,
+        "POST",
+        "/v1/auth/login",
+        None,
+        Some(json!({"username": renamed, "password": "battery staple"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, check) = call(
+        &app,
+        "GET",
+        &format!("/v1/auth/username?username={renamed}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(check["available"], true);
+}
+
+#[tokio::test]
 async fn repeated_wrong_passwords_lock_the_username() {
     let Some(app) = app().await else { return };
     let name = format!("lock-{}", &Uuid::new_v4().simple().to_string()[..8]);

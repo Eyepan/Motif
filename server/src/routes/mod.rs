@@ -1,3 +1,4 @@
+mod account;
 mod auth;
 mod events;
 mod health;
@@ -5,7 +6,7 @@ mod password;
 
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use tower_http::trace::TraceLayer;
 
 use crate::AppState;
@@ -24,7 +25,18 @@ pub fn router() -> Router<AppState> {
         .route("/v1/auth/token", post(auth::token))
         .route("/v1/auth/refresh", post(auth::refresh))
         .route("/v1/auth/logout", post(auth::logout))
-        .route("/v1/me", get(auth::me))
+        .route("/v1/auth/username", get(account::username_available))
+        .route(
+            "/v1/me",
+            get(account::me)
+                .patch(account::update_me)
+                .delete(account::delete_me),
+        )
+        .route(
+            "/v1/sessions",
+            get(account::list_sessions).delete(account::delete_other_sessions),
+        )
+        .route("/v1/sessions/{id}", delete(account::delete_session))
         .route("/v1/events", post(events::upload).get(events::pull))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(TraceLayer::new_for_http())

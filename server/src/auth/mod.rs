@@ -16,12 +16,25 @@ use axum::http::request::Parts;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::auth::tokens::Access;
 use crate::error::ApiError;
 
 /// The signed-in user, taken from `Authorization: Bearer <access token>`.
 pub struct AuthUser(pub Uuid);
 
+/// The signed-in user and the sign-in (device session) the token belongs to.
+pub struct AuthSession(pub Access);
+
 impl FromRequestParts<AppState> for AuthUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
+        let AuthSession(access) = AuthSession::from_request_parts(parts, state).await?;
+        Ok(AuthUser(access.user))
+    }
+}
+
+impl FromRequestParts<AppState> for AuthSession {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, ApiError> {
@@ -33,10 +46,10 @@ impl FromRequestParts<AppState> for AuthUser {
         let token = header
             .strip_prefix("Bearer ")
             .ok_or(ApiError::Unauthorized("missing bearer token"))?;
-        let user = state
+        let access = state
             .tokens
             .verify_access(token)
             .map_err(|_| ApiError::Unauthorized("invalid or expired access token"))?;
-        Ok(AuthUser(user))
+        Ok(AuthSession(access))
     }
 }

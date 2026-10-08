@@ -4,7 +4,7 @@
 openapi: 3.1.0
 info:
   title: Motif sync API
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://localhost:8080
     description: motif-server on a developer machine
@@ -44,7 +44,7 @@ paths:
   /v1/auth/password:
     post:
       summary: Change the password
-      description: Signs out every other session of this account and returns a new session for this device.
+      description: Signs out every other session of this account and returns a new session for this device, keeping its device name. A wrong current password is 403, not 401, so it never looks like an expired token.
       requestBody:
         required: true
         content:
@@ -59,6 +59,7 @@ paths:
         "200": { description: Password changed, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /v1/auth/token:
     post:
       summary: Exchange a provider ID token for a Motif session
@@ -74,6 +75,7 @@ paths:
               properties:
                 provider: { type: string, enum: [apple, google, dev], description: "dev is accepted only when the server runs with MOTIF_DEV_AUTH" }
                 id_token: { type: string }
+                device: { $ref: "#/components/schemas/Device" }
       responses:
         "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
         "400": { $ref: "#/components/responses/Error" }
@@ -99,28 +101,101 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/RefreshRequest" } } }
       responses:
         "204": { description: Signed out (also when the token was unknown) }
-  /v1/me:
+  /v1/auth/username:
     get:
-      summary: The signed-in account
+      summary: Check a username while signing up
+      security: []
+      parameters:
+        - { name: username, in: query, required: true, schema: { type: string } }
       responses:
         "200":
-          description: Account
+          description: The username is valid; `available` says whether it is free
           content:
             application/json:
               schema:
                 type: object
-                required: [user_id, identities]
+                required: [username, available]
                 properties:
-                  user_id: { type: string, format: uuid }
-                  username: { type: [string, "null"] }
-                  identities:
-                    type: array
-                    items:
-                      type: object
-                      required: [provider]
-                      properties:
-                        provider: { type: string }
-                        email: { type: [string, "null"] }
+                  username: { type: string, description: Normalized (lowercased) }
+                  available: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/me:
+    get:
+      summary: The signed-in account
+      responses:
+        "200": { description: Account, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      summary: Edit account details
+      description: A missing field is left unchanged. `display_name` null or blank clears it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$", description: "Case-insensitive. 400 for accounts without a password" }
+                display_name: { type: [string, "null"], maxLength: 64 }
+      responses:
+        "200": { description: Updated account, content: { application/json: { schema: { $ref: "#/components/schemas/Account" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Delete the account
+      description: Deletes the account, its synced history and every sign-in. Data on the devices is untouched. Access tokens already issued keep passing auth until they expire (at most 15 minutes), but every call then fails (404 on /v1/me, 401 on uploads).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password: { type: string, description: Required when the account has a password }
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/sessions:
+    get:
+      summary: Devices signed in to this account
+      description: Most recently used first. `last_used_at_ms` moves on each sign-in and token refresh, so it is accurate to about 15 minutes.
+      responses:
+        "200":
+          description: Signed-in devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sessions]
+                properties:
+                  sessions: { type: array, items: { $ref: "#/components/schemas/DeviceSession" } }
+        "401": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Sign out every other device
+      description: Keeps the caller's sign-in. Returns 401 for an access token issued before device sessions existed; refresh and retry.
+      responses:
+        "200":
+          description: Signed out
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [signed_out]
+                properties:
+                  signed_out: { type: integer, description: How many devices were signed out }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/sessions/{id}:
+    delete:
+      summary: Sign out one device
+      description: Its refresh token stops working at once; its current access token expires within 15 minutes. Signing out the caller's own id works like logout. Ids of other accounts are ignored.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Signed out (also when already signed out) }
         "401": { $ref: "#/components/responses/Error" }
   /v1/events:
     post:
@@ -197,7 +272,7 @@ components:
                 type: object
                 required: [code, message]
                 properties:
-                  code: { type: string, enum: [bad_request, unauthorized, not_found, conflict, too_many_requests, unavailable, internal] }
+                  code: { type: string, enum: [bad_request, unauthorized, forbidden, not_found, conflict, too_many_requests, unavailable, internal] }
                   message: { type: string }
   schemas:
     Health:
@@ -213,6 +288,39 @@ components:
       properties:
         username: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$", description: Case-insensitive }
         password: { type: string, minLength: 8, description: At most 256 bytes }
+        device: { $ref: "#/components/schemas/Device" }
+    Device:
+      description: The device signing in, shown in the list of signed-in devices. Optional.
+      type: object
+      properties:
+        name: { type: string, description: "e.g. the system device name. Trimmed and cut to 64 characters" }
+        platform: { type: string, enum: [ios, ipados, macos, android, other], description: Unknown values are stored as other }
+    DeviceSession:
+      type: object
+      required: [id, created_at_ms, last_used_at_ms, current]
+      properties:
+        id: { type: string, format: uuid }
+        device_name: { type: [string, "null"] }
+        platform: { type: [string, "null"], enum: [ios, ipados, macos, android, other, null] }
+        created_at_ms: { type: integer, format: int64, description: When this device signed in }
+        last_used_at_ms: { type: integer, format: int64 }
+        current: { type: boolean, description: This is the caller's own sign-in }
+    Account:
+      type: object
+      required: [user_id, created_at_ms, identities]
+      properties:
+        user_id: { type: string, format: uuid }
+        username: { type: [string, "null"] }
+        display_name: { type: [string, "null"], maxLength: 64 }
+        created_at_ms: { type: integer, format: int64, description: Member since }
+        identities:
+          type: array
+          items:
+            type: object
+            required: [provider]
+            properties:
+              provider: { type: string }
+              email: { type: [string, "null"] }
     RefreshRequest:
       type: object
       required: [refresh_token]

@@ -20,6 +20,17 @@ struct AccessClaims {
     aud: String,
     iat: i64,
     exp: i64,
+    /// The sign-in (refresh token family) this token belongs to. Tokens issued
+    /// before sessions were listed have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sid: Option<Uuid>,
+}
+
+/// What a valid access token says about its caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Access {
+    pub user: Uuid,
+    pub session: Option<Uuid>,
 }
 
 /// Issues and checks access tokens (HS256 JWTs, stateless) and mints refresh
@@ -43,9 +54,10 @@ impl TokenIssuer {
         }
     }
 
-    pub fn issue_access(&self, user: Uuid, now: i64) -> String {
+    pub fn issue_access(&self, user: Uuid, session: Uuid, now: i64) -> String {
         let claims = AccessClaims {
             sub: user,
+            sid: Some(session),
             iss: ISSUER.into(),
             aud: AUDIENCE.into(),
             iat: now,
@@ -55,9 +67,13 @@ impl TokenIssuer {
             .expect("HS256 encoding cannot fail")
     }
 
-    pub fn verify_access(&self, token: &str) -> Result<Uuid, jsonwebtoken::errors::Error> {
-        jsonwebtoken::decode::<AccessClaims>(token, &self.decoding, &self.validation)
-            .map(|data| data.claims.sub)
+    pub fn verify_access(&self, token: &str) -> Result<Access, jsonwebtoken::errors::Error> {
+        jsonwebtoken::decode::<AccessClaims>(token, &self.decoding, &self.validation).map(|data| {
+            Access {
+                user: data.claims.sub,
+                session: data.claims.sid,
+            }
+        })
     }
 }
 
@@ -81,9 +97,16 @@ mod tests {
     fn access_token_round_trip() {
         let issuer = TokenIssuer::new(&[7u8; 32]);
         let user = Uuid::now_v7();
+        let session = Uuid::now_v7();
         let now = jsonwebtoken::get_current_timestamp() as i64;
-        let token = issuer.issue_access(user, now);
-        assert_eq!(issuer.verify_access(&token).unwrap(), user);
+        let token = issuer.issue_access(user, session, now);
+        assert_eq!(
+            issuer.verify_access(&token).unwrap(),
+            Access {
+                user,
+                session: Some(session)
+            }
+        );
     }
 
     #[test]
@@ -94,10 +117,10 @@ mod tests {
         let now = jsonwebtoken::get_current_timestamp() as i64;
         assert!(
             issuer
-                .verify_access(&other.issue_access(user, now))
+                .verify_access(&other.issue_access(user, user, now))
                 .is_err()
         );
-        let stale = issuer.issue_access(user, now - ACCESS_TTL_SECS - 120);
+        let stale = issuer.issue_access(user, user, now - ACCESS_TTL_SECS - 120);
         assert!(issuer.verify_access(&stale).is_err());
     }
 
