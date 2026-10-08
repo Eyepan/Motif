@@ -15,7 +15,7 @@
     "sampleRate": { "type": ["integer", "null"] },
     "bitDepth": { "type": ["integer", "null"] },
     "channels": { "type": ["integer", "null"] },
-    "source": { "enum": ["local", "internet_archive", "jamendo", "bandcamp"] },
+    "source": { "enum": ["local", "internet_archive", "jamendo", "audius", "bandcamp"] },
     "sourceRef": { "type": ["string", "null"] },
     "licenseUrl": { "type": ["string", "null"], "format": "uri" },
     "bpm": { "type": ["number", "null"] },

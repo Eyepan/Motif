@@ -12,6 +12,7 @@ import app.motif.importer.Importer
 import app.motif.playback.DjEngine
 import app.motif.playback.PlaybackEngine
 import app.motif.playback.Previewer
+import app.motif.sources.AudiusSource
 import app.motif.sources.InternetArchiveSource
 import app.motif.sources.JamendoSource
 import app.motif.sources.MusicSource
@@ -66,7 +67,7 @@ class MotifApp : Application() {
 
     /** Catalogs Discover can search and download from. */
     val sources: List<MusicSource> by lazy {
-        listOf(JamendoSource { _jamendoClientId.value }, InternetArchiveSource())
+        listOf(JamendoSource { _jamendoClientId.value }, InternetArchiveSource(), AudiusSource())
     }
 
     val downloads by lazy { Downloads(cacheDir, importer, scope) }

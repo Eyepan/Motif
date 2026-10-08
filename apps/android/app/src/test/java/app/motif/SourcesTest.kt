@@ -1,6 +1,7 @@
 package app.motif
 
 import app.motif.data.Track
+import app.motif.sources.AudiusSource
 import app.motif.sources.InternetArchiveSource
 import app.motif.sources.JamendoSource
 import app.motif.sources.SourceException
@@ -117,5 +118,29 @@ class SourcesTest {
         assertTrue(item.isIn(listOf(track), "internet_archive"))
         assertFalse(item.isIn(listOf(track), "jamendo"))
         assertFalse(SourceResult("album", "Album", null, null, null, null).isIn(listOf(track), "internet_archive"))
+    }
+
+    @Test
+    fun audiusSearch() {
+        val json = """
+            {"data":[
+              {"id":"D7KyD","title":"Original Mix","duration":245,"is_downloadable":true,"orig_filename":"Original Mix.wav",
+               "user":{"name":"Some Producer","handle":"someproducer"},
+               "artwork":{"150x150":"https://a/150.jpg","480x480":"https://a/480.jpg","1000x1000":"https://a/1000.jpg"}},
+              {"id":"Q2","title":"Gated","is_downloadable":true,"is_download_gated":true,"user":{"name":"X"},"artwork":null},
+              {"id":"Q3","title":"Old Field","downloadable":true,"user":{"name":"Y"}},
+              {"id":"Q4","title":"Stream Only","is_downloadable":false,"user":{"name":"Z"}}
+            ]}
+        """.trimIndent()
+        val results = AudiusSource().parseSearch(json)
+        assertEquals(listOf(true, false, true, false), results.map { it.downloadable })
+        val first = results[0]
+        assertEquals("Some Producer", first.artist)
+        assertEquals("WAV", first.quality)
+        assertEquals(245, first.durationSeconds)
+        assertEquals("https://a/480.jpg", first.imageUrl)
+        assertEquals("https://api.audius.co/v1/tracks/D7KyD/stream?app_name=Motif", first.previewUrl)
+        assertNull(results[1].imageUrl)
+        assertNull(results[2].quality)
     }
 }

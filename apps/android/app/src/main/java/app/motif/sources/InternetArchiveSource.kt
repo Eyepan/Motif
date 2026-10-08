@@ -11,6 +11,7 @@ import java.net.URLEncoder
 class InternetArchiveSource : MusicSource {
     override val id = "internet_archive"
     override val displayName = "Internet Archive"
+    override val shortName = "Archive"
 
     private val items = object : LinkedHashMap<String, Item>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Item>?) = size > 16

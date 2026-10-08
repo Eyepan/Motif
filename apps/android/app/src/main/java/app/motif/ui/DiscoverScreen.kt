@@ -77,6 +77,9 @@ import app.motif.sources.isIn
 import app.motif.sources.licenseLabel
 import app.motif.ui.theme.Motif
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -90,13 +93,14 @@ import kotlinx.coroutines.withContext
 @Composable
 fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
     val sources = app.sources
-    // Jamendo when it's set up, else the Internet Archive, which needs nothing.
-    var sourceIndex by rememberSaveable { mutableStateOf(sources.indexOfFirst { it.isConfigured }.coerceAtLeast(0)) }
-    val source = sources[sourceIndex]
+    // 0 searches every catalog at once; i + 1 is sources[i].
+    var scopeIndex by rememberSaveable { mutableStateOf(0) }
+    val only = sources.getOrNull(scopeIndex - 1)
     var query by rememberSaveable { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<SourceResult>>(emptyList()) }
+    var hits by remember { mutableStateOf<List<Hit>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    /** Catalog name to what went wrong, for the catalogs that failed this search. */
+    var failures by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var searchedFor by remember { mutableStateOf<String?>(null) }
     val jamendoId by app.jamendoClientId.collectAsStateWithLifecycle()
     val tracks by app.library.tracks.collectAsStateWithLifecycle()
@@ -104,53 +108,50 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
     val previewing by app.previewer.playing.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
+    val uri = LocalUriHandler.current
 
     DisposableEffect(Unit) { onDispose { app.previewer.stop() } }
 
     fun search() {
         val q = query.trim()
-        if (q.isEmpty() || !source.isConfigured) return
+        val targets = (only?.let(::listOf) ?: sources).filter { it.isConfigured }
+        if (q.isEmpty() || targets.isEmpty()) return
         focus.clearFocus()
         scope.launch {
             searching = true
-            error = null
-            try {
-                results = source.search(q)
-                searchedFor = q
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                results = emptyList()
-                error = e.message ?: "Search failed"
-            } finally {
-                searching = false
-            }
+            val outcome = searchAll(targets, q)
+            hits = outcome.hits
+            failures = outcome.failures
+            searchedFor = q
+            searching = false
         }
     }
 
-    LaunchedEffect(sourceIndex, jamendoId) {
-        results = emptyList()
+    LaunchedEffect(scopeIndex, jamendoId) {
+        hits = emptyList()
+        failures = emptyMap()
         searchedFor = null
-        error = null
         app.previewer.stop()
         if (query.isNotBlank()) search()
     }
 
     Column(modifier.statusBarsPadding()) {
         Text("Discover", fontSize = 34.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 20.dp, top = 24.dp, bottom = 12.dp))
+        val labels = listOf("All") + sources.map { it.shortName }
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-            sources.forEachIndexed { i, s ->
+            labels.forEachIndexed { i, label ->
                 SegmentedButton(
-                    selected = i == sourceIndex,
-                    onClick = { sourceIndex = i },
-                    shape = SegmentedButtonDefaults.itemShape(i, sources.size),
+                    selected = i == scopeIndex,
+                    onClick = { scopeIndex = i },
+                    shape = SegmentedButtonDefaults.itemShape(i, labels.size),
+                    icon = {},
                     colors = SegmentedButtonDefaults.colors(
                         activeContainerColor = Motif.raised,
                         activeContentColor = Motif.accent,
                         inactiveContainerColor = Motif.ground,
                         inactiveContentColor = Motif.secondary,
                     ),
-                ) { Text(s.displayName) }
+                ) { Text(label, maxLines = 1, fontSize = 13.sp) }
             }
         }
         OutlinedTextField(
@@ -170,22 +171,30 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
         )
 
+        val catalogNames = (only?.let(::listOf) ?: sources.filter { it.isConfigured }).joinToString(", ") { it.displayName }
         when {
-            !source.isConfigured -> JamendoSetup(onSave = app::setJamendoClientId)
+            only != null && !only.isConfigured -> JamendoSetup(onSave = app::setJamendoClientId)
             searching -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Motif.accent)
             }
-            error != null -> Hint(error!!, Color(0xFFFF6B6B))
-            results.isEmpty() && searchedFor != null -> Hint("Nothing on ${source.displayName} for “$searchedFor” that can be downloaded in lossless.")
-            results.isEmpty() -> Hint(
-                "Search ${source.displayName} for music you're free to keep. Downloads are lossless and go straight into your library, " +
+            searchedFor == null -> Hint(
+                "Search $catalogNames for music you're free to keep. Downloads go straight into your library, " +
                     "with tags, cover art, BPM and key.",
             )
+            hits.isEmpty() -> NoResults(
+                query = searchedFor!!,
+                catalogs = catalogNames,
+                failures = failures,
+                onStore = { uri.openUri(it) },
+            )
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
-                items(results, key = { it.id }) { result ->
+                if (failures.isNotEmpty()) item { FailureNote(failures) }
+                items(hits, key = { "${it.source.id}:${it.result.id}" }) { hit ->
+                    val (source, result) = hit
                     val key = app.downloads.key(source, result)
                     ResultRow(
                         result = result,
+                        sourceName = if (only == null) source.displayName else null,
                         state = states[key],
                         inLibrary = remember(tracks, result) { result.isIn(tracks, source.id) },
                         previewing = previewing == key,
@@ -207,9 +216,78 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
     }
 }
 
+/** One search result and the catalog it came from. */
+private data class Hit(val source: MusicSource, val result: SourceResult)
+
+private class Outcome(val hits: List<Hit>, val failures: Map<String, String>)
+
+/** Searches [targets] side by side; one catalog failing doesn't hide the others' results. */
+private suspend fun searchAll(targets: List<MusicSource>, query: String): Outcome = coroutineScope {
+    val answers = targets.map { source ->
+        async {
+            try {
+                source to Result.success(source.search(query))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                source to Result.failure<List<SourceResult>>(e)
+            }
+        }
+    }.awaitAll()
+    val lists = answers.mapNotNull { (source, r) -> r.getOrNull()?.map { Hit(source, it) } }
+    Outcome(
+        // Interleave so each catalog's best matches come first.
+        hits = (0 until (lists.maxOfOrNull { it.size } ?: 0)).flatMap { i -> lists.mapNotNull { it.getOrNull(i) } },
+        failures = answers.mapNotNull { (source, r) ->
+            r.exceptionOrNull()?.let { source.displayName to (it.message ?: "Search failed") }
+        }.toMap(),
+    )
+}
+
+/** Nothing found: says so plainly, why if a catalog failed, and where the music might be sold. */
+@Composable
+private fun NoResults(query: String, catalogs: String, failures: Map<String, String>, onStore: (String) -> Unit) {
+    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("No results for “$query”", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        if (failures.isNotEmpty()) FailureNote(failures, Modifier)
+        Text(
+            "Nothing on $catalogs matches. These catalogs only carry music the artists or archives chose to share freely, " +
+                "so most label releases aren't here. Check the spelling, or look for it in a store:",
+            color = Motif.secondary, fontSize = 14.sp,
+        )
+        storeSearches(query).forEach { (name, url) ->
+            Text(name, color = Motif.accent, fontSize = 15.sp, modifier = Modifier.clickable { onStore(url) }.padding(vertical = 4.dp))
+        }
+        Text(
+            "Bought files can be added from Add Music, and Motif keeps them bit for bit.",
+            color = Motif.secondary, fontSize = 13.sp,
+        )
+    }
+}
+
+@Composable
+private fun FailureNote(failures: Map<String, String>, modifier: Modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        failures.forEach { (name, message) ->
+            Text("$name couldn't be searched: $message", color = Color(0xFFFF6B6B), fontSize = 13.sp)
+        }
+    }
+}
+
+/** Stores that sell lossless downloads, searched for [query]. */
+private fun storeSearches(query: String): List<Pair<String, String>> {
+    val q = java.net.URLEncoder.encode(query, "UTF-8")
+    return listOf(
+        "Search Qobuz (FLAC)" to "https://www.qobuz.com/search?q=$q",
+        "Search Bandcamp (FLAC)" to "https://bandcamp.com/search?q=$q",
+    )
+}
+
 @Composable
 private fun ResultRow(
     result: SourceResult,
+    /** Shown when results from several catalogs are mixed. */
+    sourceName: String?,
     state: Downloads.State?,
     inLibrary: Boolean,
     previewing: Boolean,
@@ -236,6 +314,7 @@ private fun ResultRow(
             Text(result.title, fontSize = 16.sp, color = if (previewing) Motif.accent else Motif.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 result.quality?.let { FormatBadge(it) }
+                sourceName?.let { FormatBadge(it.uppercase()) }
                 Text(
                     listOfNotNull(result.subtitle.ifEmpty { null }, result.durationSeconds?.let { formatTime(it.toDouble()) }).joinToString(" · "),
                     fontSize = 13.sp, color = Motif.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
