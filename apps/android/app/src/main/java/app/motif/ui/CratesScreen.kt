@@ -39,12 +39,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,22 +65,18 @@ private sealed interface CrateNaming {
 }
 
 /**
- * Runs crate edits off the UI and reports failures (a file that can't be read
- * for its content hash, say) as a toast.
+ * Runs crate edits in the app's scope, not the composition's, so an edit
+ * started from a dialog survives the dialog closing. Failures (a file that
+ * can't be read for its content hash, say) show as a toast.
  */
 @Composable
-private fun rememberCrateEdits(app: MotifApp): (suspend () -> Unit) -> Unit {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    return remember(app) {
-        val run: (suspend () -> Unit) -> Unit = { edit ->
-            scope.launch {
-                runCatching { edit() }.onFailure {
-                    Toast.makeText(context, it.message ?: "Couldn't change the crate", Toast.LENGTH_SHORT).show()
-                }
+private fun rememberCrateEdits(app: MotifApp): (suspend () -> Unit) -> Unit = remember(app) {
+    { edit ->
+        app.scope.launch {
+            runCatching { edit() }.onFailure {
+                Toast.makeText(app, it.message ?: "Couldn't change the crate", Toast.LENGTH_SHORT).show()
             }
         }
-        run
     }
 }
 
