@@ -179,13 +179,15 @@ class CrateStore(private val history: HistoryStore, private val library: Library
     private suspend fun keys(tracks: List<Track>): List<String> =
         tracks.map { library.contentHash(it) }.distinct()
 
-    /** Records a change and refreshes; [hashed] also reloads the library, whose tracks just gained content hashes. */
-    private suspend fun edit(change: CrateChange, hashed: Boolean = false) {
-        lock.withLock {
-            for (part in CrateLog.chunked(change)) history.append(CrateLog.EVENT_TYPE, CrateLog.VERSION, part.toJson())
-            refresh()
-        }
+    /**
+     * Records a change and refreshes. [hashed] reloads the library first, since its
+     * tracks just gained content hashes; otherwise the new crate would briefly show
+     * its songs as on another device.
+     */
+    private suspend fun edit(change: CrateChange, hashed: Boolean = false) = lock.withLock {
+        for (part in CrateLog.chunked(change)) history.append(CrateLog.EVENT_TYPE, CrateLog.VERSION, part.toJson())
         if (hashed) library.reload()
+        refresh()
     }
 
     private suspend fun refresh() {
