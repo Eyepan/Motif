@@ -1,25 +1,29 @@
 package app.motif
 
 import android.provider.DocumentsContract
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import app.motif.data.Track
 import app.motif.dsp.MotifDsp
 import app.motif.importer.ImportJob
 import app.motif.importer.TrackAnalyzer
 import app.motif.playback.DeckId
 import kotlinx.coroutines.runBlocking
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
-import org.junit.Test
 import org.junit.Rule
+import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 import kotlin.math.abs
@@ -62,7 +66,8 @@ class DjFlowTest {
         instrumentation.runOnMainSync { app.dj.pauseAll() }
     }
 
-    @Test fun syncLocksDeckBToDeckA() {
+    /** The imported tracks by title, failing with the reason when one has no beat grid. */
+    private fun griddedTracks(): Map<String, Track> {
         val tracks = app.library.tracks.value.associateBy { it.title }
         tracks.values.forEach { t ->
             if (!t.hasBeatGrid) {
@@ -74,6 +79,11 @@ class DjFlowTest {
                 )
             }
         }
+        return tracks
+    }
+
+    @Test fun syncLocksDeckBToDeckA() {
+        val tracks = griddedTracks()
 
         compose.onNodeWithContentDescription("Open DJ mix").performClick()
         instrumentation.runOnMainSync {
@@ -90,5 +100,39 @@ class DjFlowTest {
         assertEquals(a.bpm!!, b.bpm!!, 0.5)
         assertTrue("deck B speed ${b.speed}", abs(b.speed - a.bpm!! / tracks.getValue("Neon Glide").bpm!!) < 0.01)
         Screenshots.take("10-dj-synced")
+    }
+
+    @Test fun loopHoldsTheDeckEqKillsAndListeningIsHistory() {
+        val afterglow = griddedTracks().getValue("Afterglow")
+
+        compose.onNodeWithContentDescription("Open DJ mix").performClick()
+        instrumentation.runOnMainSync {
+            app.dj.load(DeckId.A, afterglow)
+            app.dj.setCrossfader(0f)
+        }
+        compose.onNodeWithContentDescription("Play deck A").performClick()
+        compose.waitUntil(5_000) { app.dj.state.value.a.isPlaying && app.dj.state.value.a.positionMs > 300 }
+
+        // Two beats at 120 BPM: a one-second loop that the deck keeps returning to.
+        compose.onNodeWithContentDescription("Deck A loop 2 beats").performClick()
+        val loop = app.dj.state.value.a.loop ?: error("no loop: ${app.dj.state.value.notice}")
+        assertEquals(1_000.0, (loop.endMs - loop.startMs).toDouble(), 2.0)
+        Thread.sleep(2_600)
+        val pos = app.dj.state.value.a.positionMs
+        assertTrue("position $pos outside loop ${loop.startMs}..${loop.endMs}", pos in (loop.startMs - 60)..(loop.endMs + 200))
+
+        // Kill the lows through the knob's accessibility action.
+        compose.onNodeWithContentDescription("Deck A low").performSemanticsAction(SemanticsActions.SetProgress) { it(-1f) }
+        assertEquals(-1f, app.dj.state.value.a.fx.low)
+        Screenshots.take("11-dj-loop-eq")
+
+        // Regular playback takes over: the DJ listen lands in history as a play.
+        instrumentation.runOnMainSync { app.dj.stopForPlayback() }
+        compose.waitUntil(10_000) {
+            runBlocking { app.history.events("play") }.any {
+                val p = JSONObject(it.payload)
+                p.optString("context") == "dj" && p.optString("track_id") == afterglow.id && p.optLong("listened_ms") > 1_000
+            }
+        }
     }
 }

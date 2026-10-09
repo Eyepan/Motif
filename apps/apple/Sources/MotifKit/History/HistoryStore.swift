@@ -146,7 +146,7 @@ public actor HistoryStore {
     // MARK: - Sync
 
     /// Event types that make up listening history, the ones "Delete history" removes (docs/server.md).
-    public static let listeningTypes = ["play", "transition", "app_session", "search"]
+    public static let listeningTypes = ["play", "transition", "dj_session", "app_session", "search"]
 
     /// The oldest events from this device the server hasn't acknowledged.
     public func unsynced(limit: Int) throws -> [HistoryEvent] {

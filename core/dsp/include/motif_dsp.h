@@ -127,6 +127,52 @@ int32_t motif_deck_sync(const MotifTiming *master, double master_pos, double mas
                         const MotifTiming *slave, double slave_pos, int32_t snap,
                         double *out_speed, double *out_pos);
 
+// Beat-aligned loop `beats` long (1/4...32) at position: starts on the beat at
+// or just before it. Returns -1 without a grid.
+int32_t motif_loop_at(const MotifTiming *timing, double position, double beats,
+                      double *out_start, double *out_end);
+// First downbeat at or after position. Returns -1 without a grid.
+int32_t motif_next_downbeat(const MotifTiming *timing, double position, double *out);
+
+// Deck EQ and filter (core/dsp/src/fx.rs). Knobs are -1...1 with 0 flat:
+// EQ cuts to -26 dB on the left and boosts +6 dB on the right; the filter is a
+// low-pass left of centre and a high-pass right of it.
+typedef struct {
+    double low;
+    double mid;
+    double high;
+    double filter;
+} MotifFxKnobs;
+
+typedef enum {
+    MOTIF_FX_LOW_SHELF = 0,
+    MOTIF_FX_PEAK = 1,
+    MOTIF_FX_HIGH_SHELF = 2,
+    MOTIF_FX_LOW_PASS = 3,
+    MOTIF_FX_HIGH_PASS = 4,
+} MotifFxKind;
+
+typedef struct {
+    uint32_t kind;  // MotifFxKind
+    double freq;    // Hz
+    double gain_db; // shelves and peak; 0 for the pass filters
+    double q;
+    uint8_t bypass; // 1 when the band leaves the sound alone
+} MotifFxBand;
+
+// The filters for knobs: low shelf, mid peak, high shelf, filter. For
+// platforms with their own EQ unit. Returns how many were written, or -1.
+int32_t motif_fx_bands(const MotifFxKnobs *knobs, MotifFxBand *out, size_t count);
+
+// The same filters run on interleaved float samples. Not thread safe: set and
+// process from one thread.
+typedef struct MotifDeckFx MotifDeckFx;
+MotifDeckFx *motif_fx_new(uint32_t sample_rate, uint32_t channels);
+void motif_fx_set(MotifDeckFx *fx, const MotifFxKnobs *knobs);
+void motif_fx_reset(MotifDeckFx *fx);  // after a seek
+void motif_fx_process(MotifDeckFx *fx, float *samples, size_t sample_count);
+void motif_fx_free(MotifDeckFx *fx);
+
 #ifdef __cplusplus
 }
 #endif

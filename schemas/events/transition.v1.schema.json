@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motif.app/schemas/events/transition.v1.schema.json",
+  "title": "transition v1",
+  "description": "One DJ-style handover from one track to another (docs/analytics.md, Mixing). DJ Mix writes one when the crossfader goes from one playing deck, through both, to the other. The envelope's track_key is the incoming track's.",
+  "type": "object",
+  "required": ["from_track_id", "to_track_id", "kind", "length_ms", "manual"],
+  "properties": {
+    "from_track_id": { "type": "string", "description": "Library track id on the device that wrote it." },
+    "to_track_id": { "type": "string" },
+    "kind": { "enum": ["gapless", "beatmatched", "crossfade", "cut"], "description": "beatmatched when SYNC held both decks on the beat." },
+    "length_ms": { "type": "integer", "minimum": 0, "description": "From both decks audible to only the incoming one." },
+    "from_bpm": { "type": "number" },
+    "to_bpm": { "type": "number" },
+    "from_key": { "type": "string", "description": "Camelot, e.g. 8A." },
+    "to_key": { "type": "string" },
+    "harmonic": { "type": "boolean", "description": "The keys are Camelot-compatible (schemas/mix-colours.json)." },
+    "tempo_shift_pct": { "type": "number", "description": "Speed change on the incoming track, percent." },
+    "manual": { "type": "boolean", "description": "The DJ moved the crossfader, rather than BLEND or Mix into next." },
+    "context": { "enum": ["dj", "mix"], "description": "dj: DJ Mix decks; mix: Mix into next." }
+  },
+  "additionalProperties": true
+}

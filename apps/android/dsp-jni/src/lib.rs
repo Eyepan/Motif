@@ -2,12 +2,13 @@
 //! with the `external fun` declarations there. Analyzer handles are boxed
 //! `Analyzer`s passed to Kotlin as `Long`.
 
-use jni::objects::{JClass, JDoubleArray, JFloatArray, JLongArray, JObject, JObjectArray, JString};
+use jni::objects::{JByteBuffer, JClass, JDoubleArray, JFloatArray, JLongArray, JObject, JObjectArray, JString};
 use jni::sys::{jboolean, jdouble, jdoubleArray, jfloat, jfloatArray, jint, jintArray, jlong, jobjectArray, jstring, JNI_TRUE};
 use jni::JNIEnv;
 use motif_dsp::analysis::Analyzer;
 use motif_dsp::crossfade::{self, Curve};
 use motif_dsp::dedupe::{self, Candidate, Verdict};
+use motif_dsp::fx::{DeckFx, Knobs};
 use motif_dsp::meta;
 use motif_dsp::mix::{self, Action, Plan, Timing};
 use motif_dsp::{deck_sync, MotifTiming};
@@ -179,6 +180,94 @@ pub extern "system" fn Java_app_motif_dsp_MotifDsp_deckSync(
         None => std::ptr::null_mut(),
     }
 }
+/// [start, end] of a beat-aligned loop `beats` long at `pos`, or null
+/// without a grid; see `mix::loop_at`.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_loopAt(
+    mut env: JNIEnv,
+    _class: JClass,
+    bpm: jdouble,
+    downbeat: jdouble,
+    pos: jdouble,
+    beats: jdouble,
+) -> jdoubleArray {
+    match (Timing { bpm, first_downbeat: downbeat, duration: 0.0 }).grid() {
+        Some(grid) => {
+            let (start, end) = mix::loop_at(&grid, pos, beats);
+            double_array(&mut env, &[start, end])
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// The first downbeat at or after `pos`, or NaN without a grid; see `mix::next_downbeat`.
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_nextDownbeat(
+    _env: JNIEnv,
+    _class: JClass,
+    bpm: jdouble,
+    downbeat: jdouble,
+    pos: jdouble,
+) -> jdouble {
+    (Timing { bpm, first_downbeat: downbeat, duration: 0.0 }).grid().map_or(f64::NAN, |g| mix::next_downbeat(&g, pos))
+}
+
+// MARK: - Deck EQ and filter (motif_dsp::fx)
+//
+// Handles are boxed `DeckFx`s passed to Kotlin as `Long`, used only from the
+// player's audio thread.
+
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_fxNew(_env: JNIEnv, _class: JClass, sample_rate: jint, channels: jint) -> jlong {
+    if sample_rate <= 0 || channels <= 0 {
+        return 0;
+    }
+    DeckFx::new(sample_rate as u32, channels as u32).map_or(0, |f| Box::into_raw(Box::new(f)) as jlong)
+}
+
+/// Sets the knobs and filters the first `count` floats of the direct buffer
+/// `samples` in place.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_fxProcess(
+    env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    samples: JByteBuffer,
+    count: jint,
+    low: jdouble,
+    mid: jdouble,
+    high: jdouble,
+    filter: jdouble,
+) {
+    // SAFETY: handles only come from fxNew and are freed once by fxFree.
+    let Some(fx) = (unsafe { (handle as *mut DeckFx).as_mut() }) else { return };
+    let (Ok(ptr), Ok(capacity)) = (env.get_direct_buffer_address(&samples), env.get_direct_buffer_capacity(&samples)) else { return };
+    let len = (count.max(0) as usize).min(capacity / 4);
+    if ptr.is_null() || len == 0 || ptr.align_offset(4) != 0 {
+        return;
+    }
+    fx.set(Knobs { low, mid, high, filter });
+    // SAFETY: the buffer is direct, holds at least `len` aligned floats, and Kotlin doesn't touch it during the call.
+    fx.process(unsafe { std::slice::from_raw_parts_mut(ptr as *mut f32, len) });
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_fxReset(_env: JNIEnv, _class: JClass, handle: jlong) {
+    // SAFETY: as in fxProcess.
+    if let Some(fx) = unsafe { (handle as *mut DeckFx).as_mut() } {
+        fx.reset();
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_motif_dsp_MotifDsp_fxFree(_env: JNIEnv, _class: JClass, handle: jlong) {
+    if handle != 0 {
+        // SAFETY: as in fxProcess; Kotlin forgets the handle after this.
+        drop(unsafe { Box::from_raw(handle as *mut DeckFx) });
+    }
+}
+
 // MARK: - Tag cleanup and artist credits (motif_dsp::meta)
 
 fn read_string(env: &mut JNIEnv, s: &JString) -> Option<String> {

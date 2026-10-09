@@ -2,6 +2,7 @@ package app.motif
 
 import android.app.Application
 import android.content.Context
+import androidx.media3.common.Player
 import app.motif.account.AccountModel
 import app.motif.data.ArtworkStore
 import app.motif.data.CrateStore
@@ -13,8 +14,11 @@ import app.motif.importer.Downloads
 import app.motif.importer.FolderImporter
 import app.motif.importer.Importer
 import app.motif.playback.DjEngine
+import app.motif.playback.DjHistory
+import app.motif.playback.DjSessionPlayer
 import app.motif.playback.PlaybackEngine
 import app.motif.playback.Previewer
+import app.motif.playback.SessionSource
 import app.motif.sources.AudiusSource
 import app.motif.sources.InternetArchiveSource
 import app.motif.sources.JamendoSource
@@ -106,14 +110,37 @@ class MotifApp : Application() {
 
     private var djStarted = false
 
-    /** The DJ Mix decks. Starting a deck pauses regular playback, and the other way round. */
+    /** What the media notification and lock screen control: regular playback, or the DJ decks once one plays. */
+    val sessionSource = MutableStateFlow(SessionSource.Playback)
+
+    /**
+     * The DJ Mix decks. Starting a deck pauses regular playback and hands the
+     * media session to the decks, and the other way round. DJ listening is
+     * written to history like any other play.
+     */
     val dj: DjEngine by lazy {
         djStarted = true
-        DjEngine(this, library, scope) { playback.pause() }
+        DjEngine(this, library, scope, DjHistory(history, library, scope)) {
+            playback.pause()
+            sessionSource.value = SessionSource.Dj
+        }.also { engine ->
+            playback.player.addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying && sessionSource.value == SessionSource.Dj) {
+                        engine.stopForPlayback()
+                        sessionSource.value = SessionSource.Playback
+                    }
+                }
+            })
+        }
     }
 
+    /** The DJ decks as one player, for the media session. */
+    val djSessionPlayer: DjSessionPlayer by lazy { DjSessionPlayer(dj, scope) }
+
     fun play(tracks: List<Track>, startAt: Int) {
-        if (djStarted) dj.pauseAll()
+        if (djStarted) dj.stopForPlayback()
+        sessionSource.value = SessionSource.Playback
         playback.play(tracks, startAt)
     }
 

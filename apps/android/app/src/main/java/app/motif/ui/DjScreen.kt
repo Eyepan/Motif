@@ -1,8 +1,11 @@
 package app.motif.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,17 +36,27 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,18 +67,21 @@ import app.motif.data.formatTime
 import app.motif.playback.DeckId
 import app.motif.playback.DeckState
 import app.motif.playback.DjEngine
+import app.motif.playback.DjState
 import app.motif.playback.MixMatch
 import app.motif.ui.theme.Motif
-import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 private fun DeckId.color(): Color = if (this == DeckId.A) Motif.deckA else Motif.deckB
 
 /**
- * DJ Mix: stacked deck waveforms, two deck panels (CUE, play, SYNC, tempo),
- * the crossfader, and a library browser that loads tracks onto either deck
- * with harmonic-match suggestions.
+ * DJ Mix: stacked deck waveforms, two deck panels (CUE, play, SYNC, tempo,
+ * EQ and filter knobs, beat loops), the crossfader with BLEND, and a library
+ * browser that loads tracks onto either deck with harmonic-match suggestions.
  */
 @Composable
 fun DjScreen(dj: DjEngine, tracks: List<Track>, modifier: Modifier = Modifier) {
@@ -112,10 +128,22 @@ fun DjScreen(dj: DjEngine, tracks: List<Track>, modifier: Modifier = Modifier) {
         }
 
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 24.dp).padding(horizontal = 20.dp),
+            Modifier.fillMaxWidth().heightIn(min = 40.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(state.notice ?: "", fontSize = 12.sp, color = Motif.badge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                state.notice ?: blendLabel(state),
+                fontSize = 12.sp, color = Motif.badge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            // Blends from the deck being heard into the other, on the beat.
+            DeckButton(
+                if (state.blend != null) "STOP BLEND" else "BLEND",
+                selected = state.blend != null,
+                color = Motif.accent,
+                enabled = state.anyPlaying,
+                onClick = dj::toggleBlend,
+            )
         }
 
         Row(Modifier.padding(start = 20.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -258,6 +286,106 @@ private fun DeckPanel(id: DeckId, deck: DeckState, dj: DjEngine, modifier: Modif
             }
             DeckButton("SYNC", selected = deck.synced, color = color, enabled = track != null) { dj.toggleSync(id) }
         }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            // Read the knobs fresh on every move: a drag sends several before the next recomposition.
+            val fx = { dj.state.value[id].fx }
+            Knob("LOW", "Deck ${id.name} low", deck.fx.low, color) { dj.setFx(id, fx().copy(low = it)) }
+            Knob("MID", "Deck ${id.name} mid", deck.fx.mid, color) { dj.setFx(id, fx().copy(mid = it)) }
+            Knob("HI", "Deck ${id.name} high", deck.fx.high, color) { dj.setFx(id, fx().copy(high = it)) }
+            Knob("FILTER", "Deck ${id.name} filter", deck.fx.filter, color) { dj.setFx(id, fx().copy(filter = it)) }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("LOOP", style = Motif.mono(9.sp, FontWeight.Bold), color = Motif.secondary)
+            DjEngine.LOOP_BEATS.forEach { beats ->
+                val on = deck.loop?.beats == beats
+                Box(
+                    Modifier.weight(1f).height(26.dp).clip(RoundedCornerShape(6.dp))
+                        .background(if (on) color else Color.Transparent)
+                        .border(1.dp, if (on) color else Motif.hairline, RoundedCornerShape(6.dp))
+                        .clickable(enabled = track?.hasBeatGrid == true) { dj.toggleLoop(id, beats) }
+                        .semantics {
+                            role = Role.Button
+                            selected = on
+                            contentDescription = "Deck ${id.name} loop ${beats.toInt()} ${if (beats == 1.0) "beat" else "beats"}"
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "${beats.toInt()}",
+                        style = Motif.mono(10.sp, FontWeight.Bold),
+                        color = when {
+                            on -> Motif.onAccent
+                            track?.hasBeatGrid == true -> Motif.text
+                            else -> Motif.secondary
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** "Blending into B · 16 bars on the beat" while BLEND runs. */
+private fun blendLabel(state: DjState): String {
+    val blend = state.blend ?: return ""
+    return "Blending into ${blend.to.name}" + (blend.bars?.let { " · $it bars on the beat" } ?: "")
+}
+
+/**
+ * A mixer knob, -1..1 with 0 at the top: drag up or down to turn it,
+ * double-tap to centre it. The arc runs from the centre to the value.
+ */
+@Composable
+private fun Knob(label: String, description: String, value: Float, color: Color, onChange: (Float) -> Unit) {
+    val current by rememberUpdatedState(value)
+    val change by rememberUpdatedState(onChange)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(
+            Modifier
+                .size(30.dp)
+                .pointerInput(Unit) {
+                    // Full left to full right over this much drag.
+                    val travel = 80.dp.toPx()
+                    var dragged = 0f
+                    detectVerticalDragGestures(onDragStart = { dragged = current }) { pointer, drag ->
+                        pointer.consume()
+                        dragged = (dragged - 2 * drag / travel).coerceIn(-1f, 1f)
+                        change(dragged)
+                    }
+                }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { change(0f) }) }
+                .semantics {
+                    contentDescription = description
+                    stateDescription = when {
+                        abs(value) < 0.005f -> "centre"
+                        else -> String.format(Locale.ROOT, "%+.0f%%", value * 100)
+                    }
+                    progressBarRangeInfo = ProgressBarRangeInfo(value, -1f..1f)
+                    setProgress { target ->
+                        change(target.coerceIn(-1f, 1f))
+                        true
+                    }
+                },
+        ) {
+            val stroke = 3.dp.toPx()
+            val inset = stroke / 2 + 1.dp.toPx()
+            val arcSize = Size(size.width - 2 * inset, size.height - 2 * inset)
+            val topLeft = Offset(inset, inset)
+            drawArc(Motif.hairline, 135f, 270f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+            if (abs(value) > 0.005f) {
+                drawArc(color, 270f, value * 135f, false, topLeft, arcSize, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+            val angle = Math.toRadians(270.0 + value * 135.0)
+            val r = arcSize.width / 2 - stroke
+            drawLine(
+                Motif.text,
+                center,
+                center + Offset((cos(angle) * r).toFloat(), (sin(angle) * r).toFloat()),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+        }
+        Text(label, style = Motif.mono(8.sp, FontWeight.Bold), color = if (abs(value) > 0.005f) color else Motif.secondary)
     }
 }
 

@@ -1,6 +1,7 @@
 package app.motif.dsp
 
 import android.util.Log
+import java.nio.ByteBuffer
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -54,6 +55,22 @@ object MotifDsp {
         masterBpm: Double, masterDownbeat: Double, masterPos: Double, masterSpeed: Double,
         slaveBpm: Double, slaveDownbeat: Double, slavePos: Double, snap: Boolean,
     ): DoubleArray?
+
+    /** [start, end] in seconds of a loop [beats] long on the beat at or just before [pos], or null without a grid. */
+    @JvmStatic external fun loopAt(bpm: Double, downbeat: Double, pos: Double, beats: Double): DoubleArray?
+
+    /** The first downbeat at or after [pos], or NaN without a grid. */
+    @JvmStatic external fun nextDownbeat(bpm: Double, downbeat: Double, pos: Double): Double
+
+    // Deck EQ and filter (core/dsp/src/fx.rs). Use through playback.DeckFxProcessor, on the audio thread only.
+
+    @JvmStatic external fun fxNew(sampleRate: Int, channels: Int): Long
+
+    /** Sets the knobs (-1..1, 0 flat) and filters the first [count] floats of the direct, native-order [samples]. */
+    @JvmStatic external fun fxProcess(handle: Long, samples: ByteBuffer, count: Int, low: Double, mid: Double, high: Double, filter: Double)
+    @JvmStatic external fun fxReset(handle: Long)
+    @JvmStatic external fun fxFree(handle: Long)
+
     // Tag cleanup and artist credits (core/dsp/src/meta.rs). Use through data.TagCleaner.
     @JvmStatic external fun metaCleanerVersion(): Int
     @JvmStatic external fun metaNorm(text: String): String
