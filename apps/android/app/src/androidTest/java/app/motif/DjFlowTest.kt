@@ -94,7 +94,12 @@ class DjFlowTest {
         compose.onNodeWithContentDescription("Play deck B").performClick()
         compose.onAllNodesWithText("SYNC")[1].performClick()
 
-        compose.waitUntil(5_000) { app.dj.state.value.b.synced && app.dj.state.value.b.isPlaying }
+        // SYNC nudges deck B's speed for a moment while it pulls into phase, then settles on deck A's tempo.
+        val expected = { app.dj.state.value.a.bpm!! / tracks.getValue("Neon Glide").bpm!! }
+        compose.waitUntil(5_000) {
+            val b = app.dj.state.value.b
+            b.synced && b.isPlaying && abs(b.speed - expected()) < 0.01
+        }
         val b = app.dj.state.value.b
         val a = app.dj.state.value.a
         assertEquals(a.bpm!!, b.bpm!!, 0.5)
