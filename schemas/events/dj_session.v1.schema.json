@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://motif.app/schemas/events/dj_session.v1.schema.json",
   "title": "dj_session v1",
-  "description": "One stretch of DJ Mix, written when it ends: five minutes with no deck playing, or regular playback taking over. Counters, not per-knob events. The decks' listening is in play events with context dj.",
+  "description": "One stretch of DJ Mix, written when it ends: five minutes with no deck playing, or regular playback taking over. Counters, not per-knob events. The decks' listening is in play events with context mix.",
   "type": "object",
   "required": ["started_at_ms", "ended_at_ms"],
   "properties": {

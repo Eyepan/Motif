@@ -1,6 +1,6 @@
 import Foundation
 
-/// One deck's play of a track in DJ Mix: a `play` event with context `dj` (docs/analytics.md).
+/// One deck's play of a track in DJ Mix: a `play` event with context `mix` (docs/analytics.md).
 public struct DJListen: Equatable, Sendable {
     public var track: Track
     public var startedAt: Date
@@ -182,7 +182,7 @@ public struct DJListenTracker {
     }
 }
 
-/// Writes DJ Mix history: `play` (context `dj`), `transition` and `dj_session` events.
+/// Writes DJ Mix history: `play` (context `mix`), `transition` and `dj_session` events.
 public struct DJHistoryWriter: Sendable {
     let history: HistoryStore
     let library: LibraryStore
@@ -204,7 +204,7 @@ public struct DJHistoryWriter: Sendable {
             "seeks": l.seeks,
             "pauses": l.pauses,
             "paused_ms": l.pausedMs,
-            "context": "dj",
+            "context": "mix",
             "control": "app",
             "mixed_in": l.mixedIn,
             "mixed_out": l.mixedOut,
@@ -219,7 +219,6 @@ public struct DJHistoryWriter: Sendable {
             "length_ms": t.lengthMs,
             "tempo_shift_pct": (t.tempoShiftPct * 100).rounded() / 100,
             "manual": t.manual,
-            "context": "dj",
         ]
         if let v = t.from.bpm { payload["from_bpm"] = v }
         if let v = t.to.bpm { payload["to_bpm"] = v }

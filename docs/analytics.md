@@ -82,7 +82,7 @@ Every event also carries the envelope above (time, timezone, device, session). "
 | `end_reason` | `completed`, `skipped`, `previous`, `stopped`, `replaced`, `error`, `interrupted` | `segmentFinished` → completed, `next()` → skipped, `previous()`, `stop()`, `play()` with a new queue → replaced, `lastError`, `open_play` recovery |
 | `seeks` | count of seeks | `seek(to:)` |
 | `pauses`, `paused_ms` | count and total time paused | `pause()` / `resume()` |
-| `context` | what started it: `library`, `album`, `artist`, `crate`, `search`, `queue`, `autoplay` (previous one finished), `mix`, `dj` (a DJ Mix deck: `listened_ms` counts only time the crossfader let it be heard) | caller of `play(_:startAt:)`; needs a parameter added |
+| `context` | what started it: `library`, `album`, `artist`, `crate`, `search`, `queue`, `autoplay` (previous one finished), `mix` | caller of `play(_:startAt:)`; needs a parameter added |
 | `context_ref` | album / crate / artist id when there is one | same |
 | `control` | where the ending command came from: `app`, `lock_screen`, `headset`, `car`, `watch`, `keyboard` | `NowPlayingController` remote command handlers vs in-app calls |
 | `route` | output when it started: `speaker`, `wired`, `bluetooth`, `airplay`, `car`, `usb_dac` | `AVAudioSession.currentRoute` (iOS), default output device (macOS) |

@@ -7,7 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-/** One deck's play of a track in DJ Mix: a `play` event with context `dj` (docs/analytics.md). */
+/** One deck's play of a track in DJ Mix: a `play` event with context `mix` (docs/analytics.md). */
 data class DjListen(
     val track: Track,
     val startedAtMs: Long,
@@ -200,7 +200,7 @@ class DjListenTracker(
     }
 }
 
-/** Writes DJ Mix history: `play` (context `dj`), `transition` and `dj_session` events. Nothing while [paused] says so. */
+/** Writes DJ Mix history: `play` (context `mix`), `transition` and `dj_session` events. Nothing while [paused] says so. */
 class DjHistory(
     private val history: HistoryStore,
     private val library: LibraryStore,
@@ -218,7 +218,7 @@ class DjHistory(
         put("seeks", l.seeks)
         put("pauses", l.pauses)
         put("paused_ms", l.pausedMs)
-        put("context", "dj")
+        put("context", "mix")
         put("control", "app")
         put("mixed_in", l.mixedIn)
         put("mixed_out", l.mixedOut)
@@ -236,7 +236,6 @@ class DjHistory(
         if (t.from.musicalKey != null && t.to.musicalKey != null) put("harmonic", MixMatch.keys(t.from, t.to))
         put("tempo_shift_pct", Math.round(t.tempoShiftPct * 100) / 100.0)
         put("manual", t.manual)
-        put("context", "dj")
     }
 
     fun session(s: DjSessionSummary) = write("dj_session", null) {

@@ -131,7 +131,7 @@ class DjFlowTest {
         compose.waitUntil(10_000) {
             runBlocking { app.history.events("play") }.any {
                 val p = JSONObject(it.payload)
-                p.optString("context") == "dj" && p.optString("track_id") == afterglow.id && p.optLong("listened_ms") > 1_000
+                p.optString("context") == "mix" && p.optString("track_id") == afterglow.id && p.optLong("listened_ms") > 1_000
             }
         }
     }

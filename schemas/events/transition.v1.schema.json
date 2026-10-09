@@ -16,8 +16,7 @@
     "to_key": { "type": "string" },
     "harmonic": { "type": "boolean", "description": "The keys are Camelot-compatible (schemas/mix-colours.json)." },
     "tempo_shift_pct": { "type": "number", "description": "Speed change on the incoming track, percent." },
-    "manual": { "type": "boolean", "description": "The DJ moved the crossfader, rather than BLEND or Mix into next." },
-    "context": { "enum": ["dj", "mix"], "description": "dj: DJ Mix decks; mix: Mix into next." }
+    "manual": { "type": "boolean", "description": "The DJ moved the crossfader, rather than BLEND or Mix into next." }
   },
   "additionalProperties": true
 }
