@@ -54,6 +54,7 @@ class LibraryFlowTest {
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
             app.playback.player.clearMediaItems()
             app.importer.clearFinished()
+            app.account.continueOffline()
         }
         runBlocking {
             app.library.load()

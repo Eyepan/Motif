@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Tune
@@ -69,6 +70,7 @@ fun LibraryScreen(
     crates: List<Crate>,
     onAddToCrate: (Track) -> Unit,
     onOpenCrate: (Crate) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var segment by rememberSaveable { mutableStateOf(Segment.Songs) }
@@ -85,6 +87,7 @@ fun LibraryScreen(
             actions = {
                 IconButton(onClick = onOpenMix) { Icon(Icons.Outlined.Tune, "Open DJ mix") }
                 IconButton(onClick = onImport) { Icon(Icons.Filled.Add, "Add music") }
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.AccountCircle, "Settings and account") }
             },
             colors = TopAppBarDefaults.largeTopAppBarColors(containerColor = Motif.ground, scrolledContainerColor = Motif.surface),
             scrollBehavior = scroll,

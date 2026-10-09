@@ -135,11 +135,149 @@ public actor HistoryStore {
 
     /// Every event of one type, in id order (time order across devices).
     public func events(ofType type: String) throws -> [HistoryEvent] {
+        try rows("SELECT \(Self.columns) FROM events WHERE type = ?1 ORDER BY id", [.text(type)])
+    }
+
+    /// Events not yet acknowledged by the server.
+    public func unsyncedCount() throws -> Int {
+        try scalar("SELECT count(*) FROM events WHERE synced = 0")
+    }
+
+    // MARK: - Sync
+
+    /// Event types that make up listening history, the ones "Delete history" removes (docs/server.md).
+    public static let listeningTypes = ["play", "transition", "app_session", "search"]
+
+    /// The oldest events from this device the server hasn't acknowledged.
+    public func unsynced(limit: Int) throws -> [HistoryEvent] {
+        try rows("SELECT \(Self.columns) FROM events WHERE synced = 0 AND device_id = ?1 ORDER BY id LIMIT ?2",
+                 [.text(deviceID), .int(Int64(limit))])
+    }
+
+    /// `synced` is 1 once the server has an event, 2 when it rejected it for good (kept, never retried).
+    public func markSynced(_ ids: [String], rejected: Bool = false) throws {
+        guard !ids.isEmpty else { return }
+        try Self.exec(db, "BEGIN")
+        do {
+            for id in ids {
+                try run("UPDATE events SET synced = ?1 WHERE id = ?2", [.int(rejected ? 2 : 1), .text(id.lowercased())])
+            }
+            try Self.exec(db, "COMMIT")
+        } catch {
+            try? Self.exec(db, "ROLLBACK")
+            throw error
+        }
+    }
+
+    /// Removes events of `types` with from <= at_ms < to (nil bounds are open), synced or not.
+    /// Used for "Delete history" here and for `history_deleted` events pulled from the server.
+    @discardableResult
+    public func delete(types: [String], fromMs: Int64?, toMs: Int64?) throws -> Int {
+        guard !types.isEmpty else { return 0 }
+        let marks = types.indices.map { "?\($0 + 3)" }.joined(separator: ", ")
+        try run("DELETE FROM events WHERE at_ms >= ?1 AND at_ms < ?2 AND type IN (\(marks))",
+                [.int(fromMs ?? .min), .int(toMs ?? .max)] + types.map { .text($0) })
+        return Int(sqlite3_changes(db))
+    }
+
+    /// Applies pulled `history_deleted` events (schemas/events/history_deleted.v1.schema.json).
+    public func applyDeletions(in events: [HistoryEvent]) throws {
+        for event in events where event.type == "history_deleted" {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(event.payload.utf8)) as? [String: Any],
+                  let from = (obj["from_ms"] as? NSNumber)?.int64Value,
+                  let to = (obj["to_ms"] as? NSNumber)?.int64Value else { continue }
+            let types = (obj["types"] as? [String]) ?? Self.listeningTypes
+            try delete(types: types.filter { $0 != "history_deleted" }, fromMs: from, toMs: to)
+        }
+    }
+
+    /// Newest first, optionally only one device's, older than `beforeMs`.
+    public func recent(types: [String], limit: Int, deviceID device: String? = nil, beforeMs: Int64? = nil) throws -> [HistoryEvent] {
+        guard !types.isEmpty else { return [] }
+        let marks = types.indices.map { "?\($0 + 4)" }.joined(separator: ", ")
+        let deviceFilter = device == nil ? "" : "AND device_id = ?3"
+        return try rows("""
+            SELECT \(Self.columns) FROM events WHERE at_ms < ?1 \(deviceFilter) AND type IN (\(marks))
+            ORDER BY at_ms DESC, id DESC LIMIT ?2
+            """, [.int(beforeMs ?? .max), .int(Int64(limit)), .text(device ?? "")] + types.map { .text($0) })
+    }
+
+    public func count(types: [String]) throws -> Int {
+        guard !types.isEmpty else { return 0 }
+        let marks = types.indices.map { "?\($0 + 1)" }.joined(separator: ", ")
+        return try scalar("SELECT count(*) FROM events WHERE type IN (\(marks))", types.map { .text($0) })
+    }
+
+    /// Every event as JSON Lines, the server's envelope, oldest first (Settings › Export).
+    public func exportJSONLines() throws -> Data {
+        var out = Data()
+        for event in try rows("SELECT \(Self.columns) FROM events ORDER BY at_ms, id", []) {
+            var obj: [String: Any] = [
+                "id": event.id, "type": event.type, "v": event.v, "at_ms": event.atMs, "tz_min": event.tzMin,
+                "device_id": event.deviceID,
+                "payload": (try? JSONSerialization.jsonObject(with: Data(event.payload.utf8))) ?? [String: Any](),
+            ]
+            if let key = event.trackKey { obj["track_key"] = key }
+            out.append(try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]))
+            out.append(0x0A)
+        }
+        return out
+    }
+
+    public func syncValue(_ key: String) -> String? { Self.syncValue(db, key) }
+
+    public func setSyncValue(_ value: String?, for key: String) throws {
+        if let value {
+            try run("INSERT INTO sync_state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    [.text(key), .text(value)])
+        } else {
+            try run("DELETE FROM sync_state WHERE key = ?1", [.text(key)])
+        }
+    }
+
+    /// Signing in to a different account: this device's events upload again and the pull starts over.
+    public func resetSync() throws {
+        try run("UPDATE events SET synced = 0 WHERE device_id = ?1 AND synced = 1", [.text(deviceID)])
+        for key in ["pull_cursor", "last_sync_ms"] { try setSyncValue(nil, for: key) }
+    }
+
+    // MARK: - Statements
+
+    private static let columns = "id, type, v, at_ms, tz_min, device_id, track_key, payload"
+
+    enum Bind {
+        case text(String)
+        case int(Int64)
+    }
+
+    private func prepare(_ sql: String, _ binds: [Bind]) throws -> OpaquePointer {
         var stmt: OpaquePointer?
-        let sql = "SELECT id, type, v, at_ms, tz_min, device_id, track_key, payload FROM events WHERE type = ?1 ORDER BY id"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else { throw lastError() }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for (i, bind) in binds.enumerated() {
+            switch bind {
+            case .text(let value): sqlite3_bind_text(stmt, Int32(i + 1), value, -1, transient)
+            case .int(let value): sqlite3_bind_int64(stmt, Int32(i + 1), value)
+            }
+        }
+        return stmt
+    }
+
+    private func run(_ sql: String, _ binds: [Bind]) throws {
+        let stmt = try prepare(sql, binds)
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, type, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw lastError() }
+    }
+
+    private func scalar(_ sql: String, _ binds: [Bind] = []) throws -> Int {
+        let stmt = try prepare(sql, binds)
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
+    }
+
+    private func rows(_ sql: String, _ binds: [Bind]) throws -> [HistoryEvent] {
+        let stmt = try prepare(sql, binds)
+        defer { sqlite3_finalize(stmt) }
         func text(_ i: Int32) -> String? {
             sqlite3_column_type(stmt, i) == SQLITE_NULL ? nil : String(cString: sqlite3_column_text(stmt, i))
         }
@@ -155,15 +293,6 @@ public actor HistoryStore {
             ))
         }
         return rows
-    }
-
-    /// Events not yet acknowledged by the server.
-    public func unsyncedCount() throws -> Int {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT count(*) FROM events WHERE synced = 0", -1, &stmt, nil) == SQLITE_OK,
-              let stmt else { throw lastError() }
-        defer { sqlite3_finalize(stmt) }
-        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
     }
 
     /// A lowercase UUIDv7: 48 bits of unix ms, then version 7, variant 10 and random bits.

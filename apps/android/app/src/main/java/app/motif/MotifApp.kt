@@ -2,6 +2,7 @@ package app.motif
 
 import android.app.Application
 import android.content.Context
+import app.motif.account.AccountModel
 import app.motif.data.ArtworkStore
 import app.motif.data.CrateStore
 import app.motif.data.HistoryStore
@@ -24,6 +25,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /** App-wide objects. Built lazily so a cold start only pays for what the first screen needs. */
@@ -50,6 +53,16 @@ class MotifApp : Application() {
 
     val crates: CrateStore by lazy {
         CrateStore(history, library).also { store -> scope.launch { store.load() } }
+    }
+
+    /** Sign-in, sync and listening history. Optional: signed out everything stays on this phone. */
+    val account: AccountModel by lazy {
+        AccountModel(this, history, scope).also { model ->
+            // Crates edited on another device arrive as pulled history events.
+            scope.launch {
+                model.state.distinctUntilChangedBy { it.historyRevision }.drop(1).collect { crates.load() }
+            }
+        }
     }
 
     private val _analyzeOnImport by lazy { MutableStateFlow(prefs.getBoolean(KEY_ANALYZE, true)) }

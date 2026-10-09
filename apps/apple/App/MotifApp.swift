@@ -28,21 +28,31 @@ struct MotifApp: App {
             .preferredColorScheme(.dark)
             .task {
                 await model.load()
+                await model.account.start()
                 model.startWatchingFolder()
                 await model.backfillArtwork()
                 await model.analyzeMissing()
             }
             .onChange(of: scenePhase) { _, phase in
                 // iOS can't watch a folder in the background; catch up on what arrived meanwhile.
-                if phase == .active { Task { await model.scanWatchedFolder() } }
+                if phase == .active {
+                    Task {
+                        await model.scanWatchedFolder()
+                        await model.account.syncNow()
+                    }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .historyDidSync)) { _ in
+                // Crates from other devices arrive through the history log.
+                Task { await model.refreshCrates() }
             }
             .alert("Something went wrong", isPresented: Binding(
-                get: { model.errorMessage != nil },
-                set: { if !$0 { model.errorMessage = nil } }
+                get: { model.errorMessage != nil || model.account.errorMessage != nil },
+                set: { if !$0 { model.errorMessage = nil; model.account.errorMessage = nil } }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(model.errorMessage ?? "")
+                Text(model.errorMessage ?? model.account.errorMessage ?? "")
             }
         }
         #if os(macOS)
@@ -56,6 +66,15 @@ struct MotifApp: App {
                 Button("Previous") { model.player.previous() }
                     .keyboardShortcut(.leftArrow, modifiers: .command)
             }
+        }
+        #endif
+
+        #if os(macOS)
+        Settings {
+            MacSettingsView()
+                .environment(model)
+                .tint(Theme.accent)
+                .preferredColorScheme(.dark)
         }
         #endif
     }

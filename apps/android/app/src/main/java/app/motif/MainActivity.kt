@@ -37,6 +37,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Android can't watch a folder for an app in the background; catch up on what arrived meanwhile.
         (application as MotifApp).folderImporter.scan()
+        // Upload and pull listening history when signed in; does nothing otherwise.
+        (application as MotifApp).account.start()
         // Connecting a controller starts PlaybackService, which owns the media notification.
         controller = MediaController.Builder(this, SessionToken(this, ComponentName(this, PlaybackService::class.java))).buildAsync()
     }
