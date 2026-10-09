@@ -108,8 +108,7 @@ class DjTest {
     @Test fun replayAfterTheEndIsANewListen() {
         val r = Recorded()
         r.tracker.loaded(0, track)
-        r.tracker.tick(0, deck(track, true, 1f), deck(null, false, 0f))
-        r.tracker.tick(2_000, deck(track, true, 1f, 2_000), deck(null, false, 0f))
+        for (t in 0..4) r.tracker.tick(500L * t, deck(track, true, 1f, 500L * t), deck(null, false, 0f))
         r.tracker.end(0, "completed", 300_000)
         r.tracker.tick(10_000, deck(track, true, 1f), deck(null, false, 0f))
         r.tracker.tick(10_500, deck(track, true, 1f, 500), deck(null, false, 0f))
