@@ -51,7 +51,7 @@ public final class PlayRecorder {
         let now = Self.nowMs
         guard now - lastCheckpointMs >= Self.checkpointIntervalMs else { return }
         lastCheckpointMs = now
-        let value = isPaused() ? nil : session.snapshot(at: now).map { Self.checkpointJSON($0, atMs: now) }
+        let value = isPaused() ? nil : session.snapshot(at: now).flatMap { Self.checkpointJSON($0, atMs: now) }
         enqueue { [history] in try? await history.setSyncValue(value, for: Self.checkpointKey) }
     }
 
