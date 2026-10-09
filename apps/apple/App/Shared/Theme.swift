@@ -231,18 +231,19 @@ struct WaveformScrubber: View {
     }
 }
 
-/// "122 to 124 BPM · 8A to 9A · 16-bar blend", or what Mix into next does when off.
+/// "122 to 124 BPM · 8A to 9A · 16-bar blend on the beat", or what Mix into next does when off.
 func mixDetail(from current: Track?, to next: Track?, enabled: Bool) -> String {
     guard enabled else { return "Off · plays straight through" }
     guard let current, let next else { return "On · nothing queued next" }
     var parts: [String] = []
     if let a = current.bpm, let b = next.bpm { parts.append("\(Int(a.rounded())) to \(Int(b.rounded())) BPM") }
     if let a = current.musicalKey, let b = next.musicalKey { parts.append("\(a) to \(b)") }
-    let length = PlaybackEngine.mixLength(for: current)
+    let plan = PlaybackEngine.mixPlan(from: current, duration: current.duration, into: next)
     if let bpm = current.bpm {
-        parts.append("\(Int((bpm * length / 240).rounded()))-bar blend")
+        let bars = Int((bpm * plan.length / 240).rounded())
+        parts.append(plan.lock > 0 ? "\(bars)-bar blend on the beat" : "\(bars)-bar blend")
     } else {
-        parts.append("\(Int(length)) s blend")
+        parts.append("\(Int(plan.length)) s blend")
     }
     return parts.joined(separator: " · ")
 }

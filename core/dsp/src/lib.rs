@@ -7,6 +7,7 @@ pub mod archive;
 pub mod beatgrid;
 pub mod crossfade;
 pub mod dedupe;
+pub mod fx;
 pub mod key;
 pub mod mix;
 pub mod meta;
@@ -331,6 +332,40 @@ pub unsafe extern "C" fn motif_deck_sync(
     }
 }
 
+/// A beat-aligned loop `beats` long at `position`; see `mix::loop_at`.
+/// Returns -1 without a grid.
+///
+/// # Safety
+/// Pointers must be valid (or null, which returns -1).
+#[no_mangle]
+pub unsafe extern "C" fn motif_loop_at(
+    timing: *const MotifTiming,
+    position: f64,
+    beats: f64,
+    out_start: *mut f64,
+    out_end: *mut f64,
+) -> i32 {
+    let (Some(t), false, false) = (timing.as_ref(), out_start.is_null(), out_end.is_null()) else { return -1 };
+    let Some(grid) = mix::Timing::from(*t).grid() else { return -1 };
+    let (start, end) = mix::loop_at(&grid, position, beats);
+    *out_start = start;
+    *out_end = end;
+    0
+}
+
+/// The first downbeat at or after `position`; see `mix::next_downbeat`.
+/// Returns -1 without a grid.
+///
+/// # Safety
+/// Pointers must be valid (or null, which returns -1).
+#[no_mangle]
+pub unsafe extern "C" fn motif_next_downbeat(timing: *const MotifTiming, position: f64, out: *mut f64) -> i32 {
+    let (Some(t), false) = (timing.as_ref(), out.is_null()) else { return -1 };
+    let Some(grid) = mix::Timing::from(*t).grid() else { return -1 };
+    *out = mix::next_downbeat(&grid, position);
+    0
+}
+
 /// `mix::sync` over raw timings; shared with the JNI bindings.
 pub fn deck_sync(
     master: &MotifTiming,
@@ -542,6 +577,98 @@ pub unsafe extern "C" fn motif_zip_free(zip: *mut MotifZip) {
     }
 }
 
+// MARK: - Deck EQ and filter (fx)
+
+/// Knob positions, each -1...1 with 0 flat; see `fx::Knobs`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MotifFxKnobs {
+    pub low: f64,
+    pub mid: f64,
+    pub high: f64,
+    pub filter: f64,
+}
+
+impl From<MotifFxKnobs> for fx::Knobs {
+    fn from(k: MotifFxKnobs) -> Self {
+        fx::Knobs { low: k.low, mid: k.mid, high: k.high, filter: k.filter }
+    }
+}
+
+/// One filter of a deck's chain; see `fx::Band`. `kind` is a `fx::Kind`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MotifFxBand {
+    pub kind: u32,
+    pub freq: f64,
+    pub gain_db: f64,
+    pub q: f64,
+    pub bypass: u8,
+}
+
+/// Writes the filters for `knobs` (low shelf, mid peak, high shelf, filter)
+/// into `out`, up to `count` of them. Returns how many were written, or -1.
+///
+/// # Safety
+/// `knobs` must be valid and `out` writable for `count` bands.
+#[no_mangle]
+pub unsafe extern "C" fn motif_fx_bands(knobs: *const MotifFxKnobs, out: *mut MotifFxBand, count: usize) -> i32 {
+    let (Some(k), false) = (knobs.as_ref(), out.is_null()) else { return -1 };
+    let bands = fx::bands((*k).into());
+    let n = bands.len().min(count);
+    let out = std::slice::from_raw_parts_mut(out, n);
+    for (o, b) in out.iter_mut().zip(bands.iter()) {
+        *o = MotifFxBand { kind: b.kind as u32, freq: b.freq, gain_db: b.gain_db, q: b.q, bypass: b.bypass as u8 };
+    }
+    n as i32
+}
+
+/// Opaque handle for C callers.
+pub struct MotifDeckFx(fx::DeckFx);
+
+#[no_mangle]
+pub extern "C" fn motif_fx_new(sample_rate: u32, channels: u32) -> *mut MotifDeckFx {
+    fx::DeckFx::new(sample_rate, channels).map_or(std::ptr::null_mut(), |f| Box::into_raw(Box::new(MotifDeckFx(f))))
+}
+
+/// # Safety
+/// `fx` must come from `motif_fx_new`; `knobs` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn motif_fx_set(fx: *mut MotifDeckFx, knobs: *const MotifFxKnobs) {
+    if let (Some(f), Some(k)) = (fx.as_mut(), knobs.as_ref()) {
+        f.0.set((*k).into());
+    }
+}
+
+/// # Safety
+/// `fx` must come from `motif_fx_new`.
+#[no_mangle]
+pub unsafe extern "C" fn motif_fx_reset(fx: *mut MotifDeckFx) {
+    if let Some(f) = fx.as_mut() {
+        f.0.reset();
+    }
+}
+
+/// Filters `sample_count` interleaved samples in place.
+///
+/// # Safety
+/// `fx` must come from `motif_fx_new`; `samples` must hold `sample_count` floats.
+#[no_mangle]
+pub unsafe extern "C" fn motif_fx_process(fx: *mut MotifDeckFx, samples: *mut f32, sample_count: usize) {
+    if let (Some(f), false) = (fx.as_mut(), samples.is_null()) {
+        f.0.process(std::slice::from_raw_parts_mut(samples, sample_count));
+    }
+}
+
+/// # Safety
+/// `fx` must come from `motif_fx_new` and not be used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn motif_fx_free(fx: *mut MotifDeckFx) {
+    if !fx.is_null() {
+        drop(Box::from_raw(fx));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,6 +693,40 @@ mod tests {
             assert!(motif_analyzer_new(0, 2).is_null());
             let (mut a, mut b) = (0.0, 0.0);
             assert_eq!(motif_crossfade_gains(0.5, 99, &mut a, &mut b), -1);
+        }
+    }
+
+    #[test]
+    fn fx_and_loop_c_abi() {
+        unsafe {
+            let knobs = MotifFxKnobs { low: -1.0, filter: 1.0, ..Default::default() };
+            let mut bands = [MotifFxBand::default(); 4];
+            assert_eq!(motif_fx_bands(&knobs, bands.as_mut_ptr(), 4), 4);
+            assert_eq!((bands[0].kind, bands[0].gain_db, bands[0].bypass), (fx::Kind::LowShelf as u32, fx::KILL_DB, 0));
+            assert_eq!((bands[1].bypass, bands[3].kind), (1, fx::Kind::HighPass as u32));
+            assert_eq!(motif_fx_bands(&knobs, bands.as_mut_ptr(), 2), 2);
+
+            let h = motif_fx_new(48_000, 2);
+            assert!(!h.is_null());
+            motif_fx_set(h, &knobs);
+            motif_fx_reset(h);
+            let mut buf = [0.25f32; 256];
+            motif_fx_process(h, buf.as_mut_ptr(), buf.len());
+            // A high-passed constant dies away.
+            assert!(buf[255].abs() < 0.05);
+            motif_fx_free(h);
+            assert!(motif_fx_new(48_000, 0).is_null());
+
+            let t = MotifTiming { bpm: 120.0, first_downbeat: 0.3, duration: 200.0 };
+            let (mut s, mut e) = (0.0, 0.0);
+            assert_eq!(motif_loop_at(&t, 1.0, 4.0, &mut s, &mut e), 0);
+            assert!((s - 0.8).abs() < 1e-9 && (e - 2.8).abs() < 1e-9);
+            let mut d = 0.0;
+            assert_eq!(motif_next_downbeat(&t, 0.5, &mut d), 0);
+            assert!((d - 2.3).abs() < 1e-9);
+            let none = MotifTiming { bpm: 120.0, first_downbeat: -1.0, duration: 200.0 };
+            assert_eq!(motif_loop_at(&none, 1.0, 4.0, &mut s, &mut e), -1);
+            assert_eq!(motif_next_downbeat(&none, 1.0, &mut d), -1);
         }
     }
 

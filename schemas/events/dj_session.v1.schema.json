@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motif.app/schemas/events/dj_session.v1.schema.json",
+  "title": "dj_session v1",
+  "description": "One stretch of DJ Mix, written when it ends: five minutes with no deck playing, or regular playback taking over. Counters, not per-knob events. The decks' listening is in play events with context mix.",
+  "type": "object",
+  "required": ["started_at_ms", "ended_at_ms"],
+  "properties": {
+    "started_at_ms": { "type": "integer", "description": "First deck started playing." },
+    "ended_at_ms": { "type": "integer", "description": "Last moment a deck was playing." },
+    "tracks_loaded": { "type": "integer", "minimum": 0 },
+    "transitions": { "type": "integer", "minimum": 0 },
+    "cues_used": { "type": "integer", "minimum": 0 },
+    "loops_used": { "type": "integer", "minimum": 0 },
+    "eq_moves": { "type": "integer", "minimum": 0, "description": "EQ and filter gestures: a run of knob moves counts once." }
+  },
+  "additionalProperties": true
+}

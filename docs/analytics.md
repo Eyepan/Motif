@@ -104,7 +104,7 @@ Built (v1, `schemas/events/play.v1.schema.json`): every field above except `cont
 | `tempo_shift_pct` | pitch adjustment applied for the beatmatch | DJ engine |
 | `manual` | user drove the crossfader vs automatic Mix into next | DJ Mix screen |
 
-**`dj_session`**: written when DJ Mix closes. `started_at_ms`, `ended_at_ms`, `tracks_loaded`, `transitions`, `cues_used`, `loops_used`, `eq_moves`. Counters, not per-knob events: enough for "you DJ'd 14 hours this year" without logging every fader nudge.
+**`dj_session`**: written when a stretch of DJ Mix ends (five minutes with no deck playing, or regular playback taking over). `started_at_ms`, `ended_at_ms`, `tracks_loaded`, `transitions`, `cues_used`, `loops_used`, `eq_moves`. Counters, not per-knob events: enough for "you DJ'd 14 hours this year" without logging every fader nudge.
 
 ### Library
 

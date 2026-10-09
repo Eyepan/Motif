@@ -36,13 +36,18 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
     /// SHA-256 of the audio file, lowercase hex: the track's identity across devices (`track_key`).
     /// Filled lazily by `LibraryStore.contentHash(for:)`; `upsert` never overwrites it.
     public var contentHash: String?
+    /// Seconds to the beat grid's first downbeat (`beat_offset_ms`), from analysis. With `bpm` it lines tracks up for DJ mixing.
+    public var firstDownbeat: Double?
+    /// `TrackAnalyzer.version` of the last analysis, nil if never analysed by a version that records it.
+    public var analyzerVersion: Int?
 
     public init(
         id: UUID = UUID(), title: String, artist: String? = nil, album: String? = nil,
         durationMs: Int, filePath: String, format: String, sampleRate: Int? = nil,
         bitDepth: Int? = nil, channels: Int? = nil, source: Source, sourceRef: String? = nil,
         licenseURL: URL? = nil, bpm: Double? = nil, loudnessDb: Double? = nil, musicalKey: String? = nil,
-        waveform: [UInt8]? = nil, addedAt: Date = .now, albumArtist: String? = nil, contentHash: String? = nil
+        waveform: [UInt8]? = nil, addedAt: Date = .now, albumArtist: String? = nil, contentHash: String? = nil,
+        firstDownbeat: Double? = nil, analyzerVersion: Int? = nil
     ) {
         self.id = id; self.title = title; self.artist = artist; self.album = album
         self.durationMs = durationMs; self.filePath = filePath; self.format = format
@@ -51,7 +56,11 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
         self.bpm = bpm; self.loudnessDb = loudnessDb; self.musicalKey = musicalKey
         self.waveform = waveform; self.addedAt = addedAt; self.albumArtist = albumArtist
         self.contentHash = contentHash
+        self.firstDownbeat = firstDownbeat; self.analyzerVersion = analyzerVersion
     }
+
+    /// Tempo and first downbeat are known, so the track can be beatmatched, looped and synced.
+    public var hasBeatGrid: Bool { bpm != nil && firstDownbeat != nil }
 
     public var isLossless: Bool { ["flac", "wav", "alac", "aiff"].contains(format) }
 

@@ -79,6 +79,8 @@ public struct ImportService: Sendable {
         updated.loudnessDb = analysis.loudnessDb
         updated.musicalKey = analysis.musicalKey
         updated.waveform = analysis.waveform
+        updated.firstDownbeat = analysis.firstDownbeat
+        updated.analyzerVersion = TrackAnalyzer.version
         return updated
     }
 

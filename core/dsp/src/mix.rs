@@ -180,6 +180,30 @@ pub fn sync(master: &Deck, slave: &Deck, snap: bool) -> Option<(f64, f64)> {
     Some(if snap { (ratio, slave.position - error * ratio) } else { (nudged(ratio, error), slave.position) })
 }
 
+/// A loop `beats` long (1/4 to 32) on the grid: it starts on the beat (or
+/// the quarter or half beat, for loops shorter than a beat) at or just before
+/// `position`, so pressing LOOP mid-beat keeps the music going and repeats
+/// from the beat it was on. Returns (start, end) in seconds.
+pub fn loop_at(grid: &Grid, position: f64, beats: f64) -> (f64, f64) {
+    let beats = beats.clamp(0.25, 32.0);
+    let length = beats * grid.beat_length();
+    let unit = grid.beat_length() * beats.min(1.0);
+    // A press a hair early still lands on the beat it meant.
+    let n = ((position - grid.first_downbeat) / unit + 0.02).floor();
+    let mut start = grid.first_downbeat + n * unit;
+    while start < 0.0 {
+        start += unit;
+    }
+    (start, start + length)
+}
+
+/// The first downbeat at or after `position`.
+pub fn next_downbeat(grid: &Grid, position: f64) -> f64 {
+    let bar = grid.bar_length();
+    let n = ((position - grid.first_downbeat) / bar - 1e-9).ceil();
+    grid.first_downbeat + n * bar
+}
+
 /// `x` wrapped into `[-period / 2, period / 2)`.
 fn wrap(x: f64, period: f64) -> f64 {
     (x + period / 2.0).rem_euclid(period) - period / 2.0
@@ -304,6 +328,31 @@ mod tests {
         // Too far apart to sync.
         let far = Deck { grid: Grid { bpm: 100.0, first_downbeat: 0.0 }, ..slave };
         assert_eq!(sync(&master, &far, true), None);
+    }
+
+    #[test]
+    fn loops_start_on_the_beat() {
+        let g = Grid { bpm: 120.0, first_downbeat: 0.3 };
+        // Beats at 0.3, 0.8, 1.3...: a 4-beat loop pressed at 1.0 starts at 0.8.
+        let (s, e) = loop_at(&g, 1.0, 4.0);
+        assert!((s - 0.8).abs() < 1e-9 && (e - 2.8).abs() < 1e-9);
+        // Pressed 5 ms early: still that beat.
+        assert!((loop_at(&g, 1.295, 1.0).0 - 1.3).abs() < 1e-9);
+        // Half-beat loops snap to half beats.
+        let (s, e) = loop_at(&g, 1.1, 0.5);
+        assert!((s - 1.05).abs() < 1e-9 && (e - 1.3).abs() < 1e-9);
+        // Before the first downbeat, never before the track starts.
+        assert!(loop_at(&g, 0.1, 1.0).0 >= 0.0);
+        assert!((loop_at(&g, 0.1, 64.0).1 - loop_at(&g, 0.1, 64.0).0 - 16.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn next_downbeat_is_on_a_bar_line() {
+        let g = Grid { bpm: 120.0, first_downbeat: 0.3 };
+        assert!((next_downbeat(&g, 0.0) - 0.3).abs() < 1e-9);
+        assert!((next_downbeat(&g, 0.3) - 0.3).abs() < 1e-9);
+        assert!((next_downbeat(&g, 0.31) - 2.3).abs() < 1e-9);
+        assert!((next_downbeat(&g, 9.0) - 10.3).abs() < 1e-9);
     }
 
     #[test]

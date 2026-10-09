@@ -80,8 +80,9 @@ public actor LibraryStore {
 
     /// Columns `upsert` writes, in bind order.
     private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at, album_artist"
-    /// Columns read into a `Track`: everything `upsert` writes, plus the content hash.
-    private static let readColumns = columns + ", content_hash"
+    /// Columns read into a `Track`: everything `upsert` writes, plus what other steps fill in
+    /// (content hash; beat grid and analyser version from `updateAnalysis`).
+    private static let readColumns = columns + ", content_hash, beat_offset_ms, analyzer_version"
 
     /// Where imported audio files live. Track.filePath is relative to this.
     public nonisolated let mediaDirectory: URL
@@ -253,8 +254,12 @@ public actor LibraryStore {
 
     public func updateAnalysis(id: UUID, _ analysis: TrackAnalysis) throws {
         try run(
-            "UPDATE tracks SET bpm = ?1, loudness_db = ?2, musical_key = ?3, waveform = ?4 WHERE id = ?5",
-            bind: [analysis.bpm, analysis.loudnessDb, analysis.musicalKey, Data(analysis.waveform), id.uuidString]
+            """
+            UPDATE tracks SET bpm = ?1, loudness_db = ?2, musical_key = ?3, waveform = ?4,
+                beat_offset_ms = ?5, analyzer_version = ?6 WHERE id = ?7
+            """,
+            bind: [analysis.bpm, analysis.loudnessDb, analysis.musicalKey, Data(analysis.waveform),
+                   analysis.firstDownbeat.map { Int(($0 * 1000).rounded()) }, TrackAnalyzer.version, id.uuidString]
         )
     }
 
@@ -382,7 +387,9 @@ public actor LibraryStore {
             waveform: bytes(16),
             addedAt: Date(timeIntervalSince1970: TimeInterval(int(17) ?? 0)),
             albumArtist: text(18),
-            contentHash: text(19)
+            contentHash: text(19),
+            firstDownbeat: int(20).map { Double($0) / 1000 },
+            analyzerVersion: int(21)
         )
     }
 

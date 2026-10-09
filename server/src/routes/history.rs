@@ -18,7 +18,7 @@ use crate::error::{ApiError, ApiResult};
 /// Event types that are listening history: what "delete history" removes.
 /// Library state (tracks, likes, crates) is not history and is never deleted
 /// here, or deleting a month of plays would also undo that month's crate edits.
-pub const HISTORY_TYPES: &[&str] = &["play", "transition", "app_session", "search"];
+pub const HISTORY_TYPES: &[&str] = &["play", "transition", "dj_session", "app_session", "search"];
 /// The tombstone the server writes into the log when history is deleted.
 pub const HISTORY_DELETED: &str = "history_deleted";
 

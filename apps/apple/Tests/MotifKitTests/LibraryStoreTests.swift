@@ -21,12 +21,22 @@ import Testing
         #expect(try await store.search("goldberg").count == 1)
         #expect(try await store.search("mozart").isEmpty)
 
-        let analysis = TrackAnalysis(bpm: 72.5, loudnessDb: -14, musicalKey: "8A", waveform: [0, 128, 255])
+        let analysis = TrackAnalysis(bpm: 72.5, loudnessDb: -14, musicalKey: "8A", waveform: [0, 128, 255], firstDownbeat: 0.25)
         try await store.updateAnalysis(id: track.id, analysis)
         let analyzed = try await store.allTracks().first
         #expect(analyzed?.bpm == 72.5)
         #expect(analyzed?.musicalKey == "8A")
         #expect(analyzed?.waveform == [0, 128, 255])
+        #expect(analyzed?.firstDownbeat == 0.25)
+        #expect(analyzed?.hasBeatGrid == true)
+        #expect(analyzed?.analyzerVersion == TrackAnalyzer.version)
+        // Later upserts (tag edits) keep the grid.
+        if var edited = analyzed {
+            edited.title = "Aria (edit)"
+            edited.firstDownbeat = nil
+            try await store.upsert(edited)
+        }
+        #expect(try await store.allTracks().first?.firstDownbeat == 0.25)
 
         try await store.delete(track)
         #expect(try await store.allTracks().isEmpty)

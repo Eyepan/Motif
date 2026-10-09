@@ -10,7 +10,7 @@
     "to_ms": { "type": "integer" },
     "types": {
       "type": "array", "uniqueItems": true,
-      "description": "Event types removed: play, transition, app_session, search.",
+      "description": "Event types removed: play, transition, dj_session, app_session, search.",
       "items": { "type": "string" }
     }
   },

@@ -273,7 +273,7 @@ class HistoryStore(context: Context) {
         private const val COLUMNS = "id, type, v, at_ms, tz_min, device_id, track_key, payload"
 
         /** Event types that make up listening history, the ones "Delete history" removes (docs/server.md). */
-        val LISTENING_TYPES = listOf("play", "transition", "app_session", "search")
+        val LISTENING_TYPES = listOf("play", "transition", "dj_session", "app_session", "search")
 
         data class Deletion(val fromMs: Long, val toMs: Long, val types: List<String>)
 
