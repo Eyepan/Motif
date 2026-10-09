@@ -281,7 +281,8 @@ class DjEngine(
         val from = current?.startMs?.div(1000.0) ?: position(id)
         val bounds = MotifDsp.loopAt(track.bpm!!, track.firstDownbeat!!, from, beats) ?: return
         val loop = DeckLoop((bounds[0] * 1000).roundToLong(), (bounds[1] * 1000).roundToLong(), beats)
-        if (loop.endMs > deck.durationMs) {
+        val durationMs = players[id]?.duration?.takeIf { it != C.TIME_UNSET && it > 0 } ?: deck.durationMs
+        if (durationMs > 0 && loop.endMs > durationMs) {
             _state.update { it.copy(notice = "Not enough track left for that loop") }
             return
         }

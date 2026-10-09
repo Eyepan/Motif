@@ -115,7 +115,7 @@ class DjFlowTest {
 
         // Two beats at 120 BPM: a one-second loop that the deck keeps returning to.
         compose.onNodeWithContentDescription("Deck A loop 2 beats").performClick()
-        val loop = app.dj.state.value.a.loop ?: error("no loop: ${app.dj.state.value.notice}")
+        val loop = app.dj.state.value.a.loop ?: error("no loop: ${app.dj.state.value.notice}, deck ${app.dj.state.value.a}")
         assertEquals(1_000.0, (loop.endMs - loop.startMs).toDouble(), 2.0)
         Thread.sleep(2_600)
         val pos = app.dj.state.value.a.positionMs
