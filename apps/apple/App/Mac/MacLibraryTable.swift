@@ -153,7 +153,7 @@ struct MacLibraryTable: View {
     /// Plays the visible list from the first selected row, so the queue follows the table.
     private func play(_ ids: Set<Row.ID>, in rows: [Row]) {
         guard let start = rows.firstIndex(where: { ids.contains($0.id) }) else { return }
-        model.player.play(rows.map(\.track), startAt: start)
+        model.player.play(rows.map(\.track), startAt: start, context: crate == nil ? .library : .crate, contextRef: crate?.id)
     }
 }
 #endif

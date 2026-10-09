@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.motif.data.Crate
 import app.motif.data.LibraryFilter
+import app.motif.data.PlayContext
 import app.motif.data.Track
 import app.motif.data.albumsOf
 import app.motif.data.artistsOf
@@ -63,7 +64,7 @@ private enum class Segment(val label: String) { Songs("Songs"), Albums("Albums")
 fun LibraryScreen(
     tracks: List<Track>,
     current: Track?,
-    onPlay: (List<Track>, Int) -> Unit,
+    onPlay: (List<Track>, Int, PlayContext) -> Unit,
     onDelete: (Track) -> Unit,
     onImport: () -> Unit,
     onOpenMix: () -> Unit,
@@ -134,7 +135,7 @@ fun LibraryScreen(
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(albums.take(10), key = { it.key }) { album ->
-                                    AlbumTile(album.title, album.artist, album.tracks[0].monogram, album.tracks.map { it.id }) { onPlay(album.tracks, 0) }
+                                    AlbumTile(album.title, album.artist, album.tracks[0].monogram, album.tracks.map { it.id }) { onPlay(album.tracks, 0, PlayContext.ALBUM) }
                                 }
                             }
                         }
@@ -145,7 +146,7 @@ fun LibraryScreen(
                     itemsIndexed(songs, key = { _, t -> t.id }) { index, track ->
                         TrackRow(
                             track, track.id == current?.id,
-                            onClick = { onPlay(songs, index) },
+                            onClick = { onPlay(songs, index, PlayContext.LIBRARY) },
                             onDelete = { onDelete(track) },
                             mixWith = current,
                             onAddToCrate = { onAddToCrate(track) },
@@ -158,7 +159,7 @@ fun LibraryScreen(
                         supportingContent = { Text("${album.artist ?: "Unknown artist"} · ${album.tracks.size} songs") },
                         leadingContent = { ArtTile(album.title, album.tracks[0].monogram, size = 56.dp, radius = 8.dp, artIds = album.tracks.map { it.id }) },
                         colors = ListItemDefaults.colors(containerColor = Motif.ground),
-                        modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(album.tracks, 0) },
+                        modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(album.tracks, 0, PlayContext.ALBUM) },
                     )
                 }
                 Segment.Artists -> {
@@ -167,7 +168,7 @@ fun LibraryScreen(
                             headlineContent = { Text(artist.name) },
                             trailingContent = { Text("${artist.tracks.size}", color = Motif.secondary) },
                             colors = ListItemDefaults.colors(containerColor = Motif.ground),
-                            modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(artist.tracks, 0) },
+                            modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(artist.tracks, 0, PlayContext.ARTIST) },
                         )
                     }
                 }

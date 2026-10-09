@@ -7,11 +7,16 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import app.motif.data.ArtworkStore
 import app.motif.data.LibraryStore
+import app.motif.data.PlayContext
+import app.motif.data.PlayEndReason
+import app.motif.data.PlayRecorder
+import app.motif.data.PlaySession
 import app.motif.data.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -70,6 +75,18 @@ class PlaybackEngine(
     private var handingOff = false
     private var ticker: Job? = null
 
+    /** Receives finished plays and checkpoints of the one in progress (listening history). */
+    var recorder: PlayRecorder? = null
+    /** The current track's play, and the incoming track's while a blend runs. */
+    private var openPlay: PlaySession? = null
+    private var openTrack: Track? = null
+    private var mixPlay: PlaySession? = null
+    private var mixTrack: Track? = null
+    /** What started the queue, for the tracks next and previous move to. */
+    private var queueContext: Pair<PlayContext, String?> = PlayContext.LIBRARY to null
+    /** Set by [skipTo] for the track the player moves to next. */
+    private var pendingContext: Pair<PlayContext, String?>? = null
+
     init {
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) = publish()
@@ -78,18 +95,43 @@ class PlaybackEngine(
                 // Keep the helper deck in step with play/pause, except while the main deck rebuffers during hand-off.
                 if (!handingOff && helperLive) helper?.let { if (isPlaying) it.play() else it.pause() }
                 if (isPlaying) startTicker()
+                val now = System.currentTimeMillis()
+                val helperPos = helper?.currentPosition ?: 0L
+                when {
+                    isPlaying -> {
+                        openPlay?.resume(now, player.currentPosition)
+                        if (helperLive) mixPlay?.resume(now, helperPos)
+                    }
+                    // Paused by someone, rather than buffering or at the end.
+                    !player.playWhenReady -> {
+                        openPlay?.pause(now, player.currentPosition)
+                        if (helperLive) mixPlay?.pause(now, helperPos)
+                    }
+                    else -> openPlay?.progress(now, player.currentPosition)
+                }
             }
 
             override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
                 // A seek from anywhere (app, notification, headset) abandons a blend in progress.
                 if (reason == Player.DISCONTINUITY_REASON_SEEK && !handingOff) cancelMix()
+                trackPlay(old, new, reason)
             }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) endPlay(PlayEndReason.COMPLETED, player.currentPosition)
+            }
+
+            override fun onPlayerError(error: PlaybackException) = endPlay(PlayEndReason.ERROR, player.currentPosition)
         })
     }
 
-    fun play(tracks: List<Track>, startAt: Int = 0) {
+    /** [context] says what started playback, for listening history. */
+    fun play(tracks: List<Track>, startAt: Int = 0, context: PlayContext = PlayContext.LIBRARY, contextRef: String? = null) {
         if (tracks.isEmpty()) return
         cancelMix()
+        endPlay(PlayEndReason.REPLACED, player.currentPosition)
+        queueContext = context to contextRef
+        beginPlay(tracks.getOrNull(startAt), queueContext)
         _state.update { it.copy(queue = tracks) }
         player.setMediaItems(tracks.map(::mediaItem), startAt, 0)
         player.prepare()
@@ -117,6 +159,7 @@ class PlaybackEngine(
 
     fun skipTo(index: Int) {
         cancelMix()
+        pendingContext = PlayContext.QUEUE to null
         player.seekToDefaultPosition(index)
         player.play()
     }
@@ -153,10 +196,69 @@ class PlaybackEngine(
         }
     }
 
+    // region Listening history
+
+    /** Ends or starts plays as the player moves between tracks or seeks within one. */
+    private fun trackPlay(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+        val now = System.currentTimeMillis()
+        val context = pendingContext
+        pendingContext = null
+        val newId = new.mediaItem?.mediaId
+        val sameItem = old.mediaItemIndex == new.mediaItemIndex && old.mediaItem?.mediaId == newId
+        if (sameItem && openPlay != null) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
+                openPlay?.seek(now, old.positionMs, new.positionMs)
+            }
+            return
+        }
+        // play() already opened the new queue's track.
+        if (!sameItem && openTrack != null && openTrack?.id == newId && old.mediaItem?.mediaId != newId) return
+        if (!sameItem) {
+            val ending = when {
+                handingOff -> PlayEndReason.COMPLETED
+                reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION -> PlayEndReason.COMPLETED
+                reason == Player.DISCONTINUITY_REASON_REMOVE -> PlayEndReason.STOPPED
+                new.mediaItemIndex < old.mediaItemIndex -> PlayEndReason.PREVIOUS
+                else -> PlayEndReason.SKIPPED
+            }
+            endPlay(ending, old.positionMs, mixedOut = handingOff)
+        }
+        if (handingOff && mixPlay != null && mixTrack?.id == newId) {
+            openPlay = mixPlay
+            openTrack = mixTrack
+            mixPlay = null
+            mixTrack = null
+            return
+        }
+        val track = _state.value.queue.firstOrNull { it.id == newId }
+        beginPlay(track, context ?: if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) PlayContext.AUTOPLAY to null else queueContext)
+        if (player.isPlaying) openPlay?.resume(now, new.positionMs)
+    }
+
+    private fun beginPlay(track: Track?, context: Pair<PlayContext, String?>) {
+        openTrack = track
+        openPlay = track?.let { PlaySession(it.id, it.durationMs, context.first, context.second) }
+    }
+
+    private fun endPlay(reason: PlayEndReason, posMs: Long, mixedOut: Boolean = false) {
+        val session = openPlay ?: return
+        val track = openTrack
+        openPlay = null
+        openTrack = null
+        val payload = session.end(System.currentTimeMillis(), posMs, reason, mixedOut) ?: return
+        if (track != null) recorder?.finish(payload, track)
+    }
+
+    // endregion
+
     private fun startTicker() {
         if (ticker?.isActive == true) return
         ticker = scope.launch {
             while (isActive && (player.isPlaying || mixJob?.isActive == true)) {
+                if (player.isPlaying) openPlay?.let { session ->
+                    session.progress(System.currentTimeMillis(), player.currentPosition)
+                    recorder?.checkpoint(session)
+                }
                 publish()
                 startMixIfDue()
                 delay(if (mixJob?.isActive == true) 100 else 250)
@@ -205,7 +307,12 @@ class PlaybackEngine(
         val target = plan.inPositionAt(outPosition())
         if (abs(deck.currentPosition / 1000.0 - target) > 0.025) deck.seekTo((target * 1000).toLong())
         helperLive = true
-        if (player.isPlaying) deck.play()
+        mixTrack = incoming
+        mixPlay = PlaySession(incoming.id, incoming.durationMs, PlayContext.AUTOPLAY, mixedIn = true)
+        if (player.isPlaying) {
+            deck.play()
+            mixPlay?.resume(System.currentTimeMillis(), deck.currentPosition)
+        }
         _state.update { it.copy(isMixing = true) }
 
         var lastSeek = 0L
@@ -213,6 +320,7 @@ class PlaybackEngine(
             val step = Mixing.follow(plan, outPosition(), deck.currentPosition / 1000.0)
             player.volume = step.gainOut
             deck.volume = step.gainIn
+            if (player.isPlaying) mixPlay?.progress(System.currentTimeMillis(), deck.currentPosition)
             val settled = deck.playbackState == Player.STATE_READY && deck.isPlaying
             val now = SystemClock.elapsedRealtime()
             if (step.seekTo != null) {
@@ -254,6 +362,8 @@ class PlaybackEngine(
     private fun cancelMix() {
         mixJob?.cancel()
         mixJob = null
+        mixPlay = null
+        mixTrack = null
         retireHelper()
         handingOff = false
         player.volume = 1f

@@ -38,7 +38,7 @@ struct MacRootView: View {
                         Label(crate.name, systemImage: "square.stack")
                             .tag(SidebarItem.crate(crate.id))
                             .contextMenu {
-                                Button("Play") { model.player.play(model.tracks(in: crate)) }
+                                Button("Play") { model.player.play(model.tracks(in: crate), context: .crate, contextRef: crate.id) }
                                 Button("Rename…") { model.crateNaming = .rename(crate) }
                                 Divider()
                                 Button("Delete Crate", role: .destructive) {

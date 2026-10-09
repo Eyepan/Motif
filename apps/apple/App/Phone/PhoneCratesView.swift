@@ -62,7 +62,7 @@ struct CrateRows: View {
                 Button("Rename") { model.crateNaming = .rename(crate) }
             }
             .contextMenu {
-                Button("Play") { model.player.play(tracks) }
+                Button("Play") { model.player.play(tracks, context: .crate, contextRef: crate.id) }
                 Button("Rename…") { model.crateNaming = .rename(crate) }
                 Button("Delete Crate", role: .destructive) { Task { await model.deleteCrate(crate) } }
             }
@@ -92,7 +92,7 @@ struct PhoneCrateDetailView: View {
                 .listRowSeparator(.hidden)
                 Section {
                     ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-                        Button { model.player.play(songs, startAt: index) } label: {
+                        Button { model.player.play(songs, startAt: index, context: .crate, contextRef: crate.id) } label: {
                             TrackRow(track: track, isCurrent: model.player.current?.id == track.id)
                         }
                         .buttonStyle(.plain)
@@ -123,7 +123,7 @@ struct PhoneCrateDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("Play", systemImage: "play.fill") { model.player.play(songs) }
+                        Button("Play", systemImage: "play.fill") { model.player.play(songs, context: .crate, contextRef: crate.id) }
                             .disabled(songs.isEmpty)
                         Button("Rename…", systemImage: "pencil") { model.crateNaming = .rename(crate) }
                         Button("Delete Crate", systemImage: "trash", role: .destructive) {

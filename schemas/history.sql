@@ -23,7 +23,9 @@ CREATE INDEX IF NOT EXISTS events_type_at ON events(type, at_ms);
 CREATE INDEX IF NOT EXISTS events_track ON events(track_key, at_ms);
 CREATE INDEX IF NOT EXISTS events_unsynced ON events(synced) WHERE synced = 0;
 
--- Per-install values: device_id now, the server pull cursor once sync lands.
+-- Per-install values: device_id, the server pull cursor, and open_play, the
+-- play in progress checkpointed every 15 s and recovered on the next launch
+-- as an 'interrupted' play (docs/analytics.md).
 CREATE TABLE IF NOT EXISTS sync_state (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL

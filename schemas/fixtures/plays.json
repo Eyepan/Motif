@@ -1,0 +1,104 @@
+{
+  "description": "How every platform turns playback into a play v1 payload (schemas/events/play.v1.schema.json). Each case opens a play, applies the steps in order and expects the payload, or null when nothing should be written. Times are wall-clock ms, positions are ms into the track. Rules: the first resume starts the play; position moving forward while playing counts as listened, capped at twice the wall time since the last step plus 1 s so an unreported jump isn't counted; seeks and time while paused never count. 'snapshot' is the checkpoint recovered as an interrupted play after a crash.",
+  "cases": [
+    {
+      "name": "played to the end",
+      "play": { "track_id": "t1", "duration_ms": 200000, "context": "library" },
+      "steps": [
+        { "op": "resume", "at": 1000, "pos": 0 },
+        { "op": "progress", "at": 100000, "pos": 99000 },
+        { "op": "end", "at": 201000, "pos": 200000, "reason": "completed" }
+      ],
+      "expected": {
+        "track_id": "t1", "started_at_ms": 1000, "listened_ms": 200000, "start_pos_ms": 0, "end_pos_ms": 200000,
+        "duration_ms": 200000, "end_reason": "completed", "seeks": 0, "pauses": 0, "paused_ms": 0,
+        "context": "library", "mixed_in": false, "mixed_out": false
+      }
+    },
+    {
+      "name": "paused, seeked past a stretch, then skipped",
+      "play": { "track_id": "t2", "duration_ms": 240000, "context": "crate", "context_ref": "0192a1b0-0000-7000-8000-00000000000a" },
+      "steps": [
+        { "op": "resume", "at": 10000, "pos": 0 },
+        { "op": "pause", "at": 40000, "pos": 30000 },
+        { "op": "resume", "at": 70000, "pos": 30000 },
+        { "op": "seek", "at": 80000, "from": 40000, "to": 150000 },
+        { "op": "progress", "at": 90000, "pos": 160000 },
+        { "op": "end", "at": 95000, "pos": 165000, "reason": "skipped" }
+      ],
+      "expected": {
+        "track_id": "t2", "started_at_ms": 10000, "listened_ms": 55000, "start_pos_ms": 0, "end_pos_ms": 165000,
+        "duration_ms": 240000, "end_reason": "skipped", "seeks": 1, "pauses": 1, "paused_ms": 30000,
+        "context": "crate", "context_ref": "0192a1b0-0000-7000-8000-00000000000a", "mixed_in": false, "mixed_out": false
+      }
+    },
+    {
+      "name": "loaded but never started",
+      "play": { "track_id": "t3", "duration_ms": 180000, "context": "queue" },
+      "steps": [
+        { "op": "seek", "at": 1000, "from": 0, "to": 60000 },
+        { "op": "end", "at": 5000, "pos": 60000, "reason": "skipped" }
+      ],
+      "expected": null
+    },
+    {
+      "name": "an unreported jump is capped",
+      "play": { "track_id": "t4", "duration_ms": 300000, "context": "search" },
+      "steps": [
+        { "op": "resume", "at": 0, "pos": 0 },
+        { "op": "progress", "at": 1000, "pos": 1000 },
+        { "op": "progress", "at": 2000, "pos": 120000 },
+        { "op": "progress", "at": 2500, "pos": 100000 },
+        { "op": "end", "at": 3500, "pos": 101000, "reason": "stopped" }
+      ],
+      "expected": {
+        "track_id": "t4", "started_at_ms": 0, "listened_ms": 5000, "start_pos_ms": 0, "end_pos_ms": 101000,
+        "duration_ms": 300000, "end_reason": "stopped", "seeks": 0, "pauses": 0, "paused_ms": 0,
+        "context": "search", "mixed_in": false, "mixed_out": false
+      }
+    },
+    {
+      "name": "mixed in, then replaced while paused",
+      "play": { "track_id": "t5", "duration_ms": 210000, "context": "autoplay", "mixed_in": true },
+      "steps": [
+        { "op": "resume", "at": 0, "pos": 5000 },
+        { "op": "resume", "at": 500, "pos": 5500 },
+        { "op": "pause", "at": 20000, "pos": 25000 },
+        { "op": "pause", "at": 21000, "pos": 25000 },
+        { "op": "end", "at": 50000, "pos": 25000, "reason": "replaced" }
+      ],
+      "expected": {
+        "track_id": "t5", "started_at_ms": 0, "listened_ms": 20000, "start_pos_ms": 5000, "end_pos_ms": 25000,
+        "duration_ms": 210000, "end_reason": "replaced", "seeks": 0, "pauses": 1, "paused_ms": 30000,
+        "context": "autoplay", "mixed_in": true, "mixed_out": false
+      }
+    },
+    {
+      "name": "blended out into the next track",
+      "play": { "track_id": "t6", "duration_ms": 30000, "context": "album" },
+      "steps": [
+        { "op": "resume", "at": 0, "pos": 0 },
+        { "op": "end", "at": 30000, "pos": 30000, "reason": "completed", "mixed_out": true }
+      ],
+      "expected": {
+        "track_id": "t6", "started_at_ms": 0, "listened_ms": 30000, "start_pos_ms": 0, "end_pos_ms": 30000,
+        "duration_ms": 30000, "end_reason": "completed", "seeks": 0, "pauses": 0, "paused_ms": 0,
+        "context": "album", "mixed_in": false, "mixed_out": true
+      }
+    },
+    {
+      "name": "checkpoint recovered after a crash",
+      "play": { "track_id": "t7", "duration_ms": 250000, "context": "artist" },
+      "steps": [
+        { "op": "resume", "at": 0, "pos": 0 },
+        { "op": "pause", "at": 15000, "pos": 15000 },
+        { "op": "snapshot", "at": 20000 }
+      ],
+      "expected": {
+        "track_id": "t7", "started_at_ms": 0, "listened_ms": 15000, "start_pos_ms": 0, "end_pos_ms": 15000,
+        "duration_ms": 250000, "end_reason": "interrupted", "seeks": 0, "pauses": 1, "paused_ms": 5000,
+        "context": "artist", "mixed_in": false, "mixed_out": false
+      }
+    }
+  ]
+}

@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.MotifApp
+import app.motif.data.PlayContext
 import app.motif.data.Track
 import app.motif.ui.theme.Motif
 
@@ -94,7 +95,7 @@ fun MotifRoot(app: MotifApp) {
             Tab.Library -> LibraryScreen(
                 tracks = tracks,
                 current = player.current,
-                onPlay = app::play,
+                onPlay = { list, index, context -> app.play(list, index, context) },
                 onDelete = app::delete,
                 onImport = { showImport = true },
                 onOpenMix = { tab = Tab.Mix },
@@ -109,7 +110,7 @@ fun MotifRoot(app: MotifApp) {
             Tab.Search -> SearchScreen(
                 tracks = tracks,
                 current = player.current,
-                onPlay = app::play,
+                onPlay = { list, index -> app.play(list, index, PlayContext.SEARCH) },
                 modifier = modifier,
             )
             Tab.Discover -> DiscoverScreen(app, modifier)

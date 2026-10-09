@@ -26,7 +26,7 @@ struct PhoneLibraryView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 12) {
                                 ForEach(model.albums.prefix(10)) { album in
-                                    Button { model.player.play(album.tracks) } label: {
+                                    Button { model.player.play(album.tracks, context: .album) } label: {
                                         AlbumTile(title: album.title, artist: album.artist, letter: album.tracks[0].monogram, artwork: album.artwork)
                                     }
                                     .buttonStyle(.plain)
@@ -60,7 +60,7 @@ struct PhoneLibraryView: View {
                 }
             case .albums:
                 ForEach(model.albums) { album in
-                    Button { model.player.play(album.tracks) } label: {
+                    Button { model.player.play(album.tracks, context: .album) } label: {
                         HStack(spacing: 12) {
                             ArtTile(seed: album.title, letter: album.tracks[0].monogram, size: 56, radius: 8, artwork: album.artwork)
                             VStack(alignment: .leading, spacing: 2) {
@@ -75,7 +75,7 @@ struct PhoneLibraryView: View {
                 }
             case .artists:
                 ForEach(model.artists) { artist in
-                    Button { model.player.play(artist.tracks) } label: {
+                    Button { model.player.play(artist.tracks, context: .artist) } label: {
                         LabeledContent(artist.name, value: "\(artist.tracks.count)")
                     }
                     .listRowBackground(Color.clear)

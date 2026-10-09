@@ -165,7 +165,7 @@ struct QueueSheet: View {
         NavigationStack {
             List {
                 ForEach(Array(player.queue.enumerated()), id: \.element.id) { index, track in
-                    Button { player.play(player.queue, startAt: index) } label: {
+                    Button { player.play(player.queue, startAt: index, context: .queue) } label: {
                         TrackRow(track: track, isCurrent: index == player.currentIndex)
                     }
                     .buttonStyle(.plain)
