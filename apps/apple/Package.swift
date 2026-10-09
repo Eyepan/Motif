@@ -15,6 +15,6 @@ let package = Package(
         ),
         // Built from core/dsp by core/dsp/scripts/build-apple.sh into Frameworks/; not checked in.
         .binaryTarget(name: "MotifDSP", path: "Frameworks/MotifDSP.xcframework"),
-        .testTarget(name: "MotifKitTests", dependencies: ["MotifKit"]),
+        .testTarget(name: "MotifKitTests", dependencies: ["MotifKit", "MotifDSP"]),
     ]
 )

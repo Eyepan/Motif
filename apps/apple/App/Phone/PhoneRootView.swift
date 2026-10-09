@@ -17,10 +17,7 @@ struct PhoneRootView: View {
             .withMiniPlayer()
             .tabItem { Label("Crates", systemImage: "square.stack") }
             .tag(AppModel.PhoneTab.crates)
-            NavigationStack {
-                ComingSoonView(title: "Mix", systemImage: "dial.medium",
-                               detail: "The two-deck DJ mix is on its way. Until then, turn on Mix into next in Now Playing for automatic blends.")
-            }
+            NavigationStack { DJMixView().navigationBarTitleDisplayMode(.inline) }
             .withMiniPlayer()
             .tabItem { Label("Mix", systemImage: "dial.medium") }
             .tag(AppModel.PhoneTab.mix)
@@ -34,19 +31,6 @@ struct PhoneRootView: View {
         .sheet(isPresented: $model.showSettings) { PhoneSettingsView() }
         .fullScreenCover(isPresented: $account.showWelcome) { PhoneWelcomeView() }
         .crateNamePrompt()
-    }
-}
-
-private struct ComingSoonView: View {
-    let title: String
-    let systemImage: String
-    let detail: String
-
-    var body: some View {
-        ContentUnavailableView(title, systemImage: systemImage, description: Text(detail))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.ground)
-            .navigationTitle(title)
     }
 }
 

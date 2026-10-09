@@ -39,6 +39,8 @@ final class AppModel {
     let store: LibraryStore
     let crateStore: CrateStore
     let player: PlaybackEngine
+    /// DJ Mix decks. Starting a deck pauses regular playback and takes over the lock screen; playing music again hands it back.
+    let dj: DJEngine
     let importer: ImportService
     let folderImporter: FolderImporter
     let sources: [any MusicSource]
@@ -79,6 +81,7 @@ final class AppModel {
         crateStore = CrateStore(history: history, library: store)
         account = AccountModel(history: history)
         player = PlaybackEngine(store: store)
+        dj = DJEngine(store: store, history: history)
         importer = ImportService(store: store)
         folderImporter = FolderImporter(importer: importer, store: store,
                                         stateFile: store.mediaDirectory.deletingLastPathComponent().appending(path: "folder-import.json"))
@@ -86,6 +89,14 @@ final class AppModel {
         sources = (jamendo.isConfigured ? [jamendo] : []) + [InternetArchiveSource(), AudiusSource()]
         analyzeOnImport = UserDefaults.standard.object(forKey: "analyzeOnImport") as? Bool ?? true
         player.mixIntoNext = UserDefaults.standard.bool(forKey: "mixIntoNext")
+        let player = player, dj = dj, account = account
+        dj.onStart = {
+            if player.state == .playing { player.pause() }
+            player.djTakeover = dj
+        }
+        dj.onNowPlayingChange = { player.nowPlayingChanged() }
+        // DJ listening is history like any other play, and pauses with it.
+        dj.historyPaused = { account.historyPaused }
         #if os(macOS)
         readFromDownloads = UserDefaults.standard.bool(forKey: "readFromDownloads")
         #else
@@ -345,10 +356,11 @@ final class AppModel {
         }
     }
 
-    /// Analyzes tracks imported before analysis existed, or with it switched off.
+    /// Analyzes tracks imported before analysis existed, with it switched off, or
+    /// before it found beat grids (for DJ Mix and beat-aligned Mix into next).
     func analyzeMissing() async {
         guard analyzeOnImport else { return }
-        let pending = tracks.filter { $0.waveform == nil }
+        let pending = tracks.filter { $0.waveform == nil || ($0.analyzerVersion ?? 0) < TrackAnalyzer.version }
         for track in pending {
             _ = await importer.analyze(track)
         }
@@ -368,6 +380,7 @@ final class AppModel {
 
     func delete(_ track: Track) async {
         if player.current?.id == track.id { player.stop() }
+        dj.remove(track)
         do { try await store.delete(track) } catch { errorMessage = error.localizedDescription }
         await refresh()
     }

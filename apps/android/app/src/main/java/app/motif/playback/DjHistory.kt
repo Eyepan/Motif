@@ -200,11 +200,12 @@ class DjListenTracker(
     }
 }
 
-/** Writes DJ Mix history: `play` (context `dj`), `transition` and `dj_session` events. */
+/** Writes DJ Mix history: `play` (context `dj`), `transition` and `dj_session` events. Nothing while [paused] says so. */
 class DjHistory(
     private val history: HistoryStore,
     private val library: LibraryStore,
     private val scope: CoroutineScope,
+    private val paused: () -> Boolean = { false },
 ) {
     fun play(l: DjListen) = write("play", l.track) {
         put("track_id", l.track.id)
@@ -249,6 +250,7 @@ class DjHistory(
     }
 
     private fun write(type: String, track: Track?, fill: JSONObject.() -> Unit) {
+        if (paused()) return
         val payload = JSONObject().apply(fill).toString()
         scope.launch {
             val key = track?.let { runCatching { library.contentHash(it) }.getOrNull() }

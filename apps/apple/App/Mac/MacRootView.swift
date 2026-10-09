@@ -3,7 +3,7 @@ import MotifKit
 import SwiftUI
 
 enum SidebarItem: Hashable {
-    case songs, albums, artists, recent, catalogs
+    case songs, albums, artists, recent, catalogs, djMix
     case crate(String)
 
     var title: String {
@@ -13,6 +13,7 @@ enum SidebarItem: Hashable {
         case .artists: "Artists"
         case .recent: "Recently Added"
         case .catalogs: "Open Catalogs"
+        case .djMix: "DJ Mix"
         case .crate: "Crate"
         }
     }
@@ -32,6 +33,9 @@ struct MacRootView: View {
                     Label("Albums", systemImage: "square.stack").tag(SidebarItem.albums)
                     Label("Artists", systemImage: "music.mic").tag(SidebarItem.artists)
                     Label("Recently Added", systemImage: "clock").tag(SidebarItem.recent)
+                }
+                Section("Mix") {
+                    Label("DJ Mix", systemImage: "dial.medium").tag(SidebarItem.djMix)
                 }
                 Section("Crates") {
                     ForEach(model.crates) { crate in
@@ -70,6 +74,7 @@ struct MacRootView: View {
                 case .albums: MacAlbumGrid()
                 case .artists: MacArtistList()
                 case .catalogs: DiscoverView()
+                case .djMix: DJMixView()
                 case .crate(let id):
                     if let crate = model.crates.first(where: { $0.id == id }) {
                         MacLibraryTable(title: crate.name, tracks: model.tracks(in: crate), crate: crate)

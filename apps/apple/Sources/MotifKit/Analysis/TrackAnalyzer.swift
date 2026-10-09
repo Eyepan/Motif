@@ -8,6 +8,8 @@ public struct TrackAnalysis: Sendable, Equatable {
     /// Camelot notation, e.g. "8A".
     public var musicalKey: String?
     public var waveform: [UInt8]
+    /// Seconds to the first downbeat of the beat grid.
+    public var firstDownbeat: Double?
 }
 
 /// Decodes a file in chunks and runs it through the shared DSP core
@@ -17,6 +19,9 @@ public enum TrackAnalyzer {
     public enum AnalyzerError: Error { case unsupportedFormat }
 
     private static let chunkFrames: AVAudioFrameCount = 32_768
+
+    /// Stored with each analysis. 1: the first that finds beat grids.
+    public static let version = 1
 
     /// Synchronous and CPU-bound: call it off the main actor.
     public static func analyze(_ url: URL) throws -> TrackAnalysis {
@@ -39,10 +44,12 @@ public enum TrackAnalyzer {
         overview.withUnsafeMutableBufferPointer { _ = motif_analyzer_overview(analyzer, $0.baseAddress, $0.count) }
 
         return TrackAnalysis(
-            bpm: result.bpm > 0 ? (Double(result.bpm) * 10).rounded() / 10 : nil,
+            // Unrounded: the beat grid needs the fitted tempo to stay on the beat minutes in.
+            bpm: result.bpm > 0 ? Double(result.bpm) : nil,
             loudnessDb: result.rms_db.isFinite ? Double(result.rms_db) : nil,
             musicalKey: result.camelot_number > 0 ? "\(result.camelot_number)\(result.camelot_minor == 1 ? "A" : "B")" : nil,
-            waveform: overview.map { UInt8(max(0, min(255, ($0 * 255).rounded()))) }
+            waveform: overview.map { UInt8(max(0, min(255, ($0 * 255).rounded()))) },
+            firstDownbeat: result.first_downbeat >= 0 && result.bpm > 0 ? Double(result.first_downbeat) : nil
         )
     }
 }

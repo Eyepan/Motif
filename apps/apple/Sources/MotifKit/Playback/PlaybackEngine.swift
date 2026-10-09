@@ -1,11 +1,13 @@
 import AVFoundation
+import MotifDSP
 import Observation
 
 /// Player built on AVAudioEngine with two decks. Plays FLAC, WAV, ALAC and
 /// AIFF without transcoding. With `mixIntoNext` on, the end of each track is
-/// blended into the next one: the incoming deck is tempo-matched and the
-/// decks crossfade on the DSP core's equal-power curve. Otherwise tracks
-/// play back to back.
+/// blended into the next one as the DSP core plans it (`motif_mix_plan`):
+/// with beat grids on both, a 16, 8 or 4 bar blend from downbeat to downbeat
+/// with the incoming track held on the beat; otherwise a tempo-matched
+/// equal-power crossfade. Otherwise tracks play back to back.
 @MainActor
 @Observable
 public final class PlaybackEngine {
@@ -21,6 +23,15 @@ public final class PlaybackEngine {
     /// True while a blend into the next track is running.
     public private(set) var isMixing = false
     public var mixIntoNext = false
+
+    /// DJ Mix while its decks play: the lock screen and its controls go to the
+    /// decks until regular playback starts again, which pauses them.
+    public var djTakeover: DJEngine? {
+        didSet { nowPlaying.update() }
+    }
+
+    /// Republishes the lock screen info, e.g. when the DJ decks change.
+    public func nowPlayingChanged() { nowPlaying.update() }
 
     /// Output volume, 0...1.
     public var volume: Float = 1 {
@@ -83,6 +94,10 @@ public final class PlaybackEngine {
 
     public func resume() {
         guard deck.file != nil else { return }
+        if let dj = djTakeover {
+            djTakeover = nil
+            dj.stopForPlayback()
+        }
         do {
             try startEngineIfNeeded()
             deck.player.play()
@@ -235,13 +250,21 @@ public final class PlaybackEngine {
     private func startMixIfDue() {
         guard mixIntoNext, !isMixing, state == .playing, let outgoing = current, let index = currentIndex,
               let incoming = upNext else { return }
-        let length = Self.mixLength(for: outgoing)
-        let remaining = duration - position
-        guard length > 1, remaining <= length, remaining > 0.5 else { return }
-        beginMix(from: outgoing, into: incoming, at: index + 1, length: remaining)
+        let plan = Self.mixPlan(from: outgoing, duration: duration, into: incoming)
+        guard plan.length > 1, position >= plan.out_start, position < plan.out_start + plan.length - 0.5 else { return }
+        beginMix(into: incoming, at: index + 1, plan: plan)
     }
 
-    private func beginMix(from outgoingTrack: Track, into track: Track, at index: Int, length: TimeInterval) {
+    /// The DSP core's blend from the end of `outgoing` (lasting `duration`) into `incoming`.
+    public nonisolated static func mixPlan(from outgoing: Track, duration: TimeInterval, into incoming: Track) -> MotifMixPlan {
+        var out = MotifTiming(bpm: outgoing.bpm ?? 0, first_downbeat: outgoing.firstDownbeat ?? -1, duration: duration)
+        var inc = MotifTiming(bpm: incoming.bpm ?? 0, first_downbeat: incoming.firstDownbeat ?? -1, duration: incoming.duration)
+        var plan = MotifMixPlan()
+        motif_mix_plan(&out, &inc, &plan)
+        return plan
+    }
+
+    private func beginMix(into track: Track, at index: Int, plan: MotifMixPlan) {
         isMixing = true
         mixTask = Task {
             let url = await store.url(for: track)
@@ -251,30 +274,44 @@ public final class PlaybackEngine {
                 return
             }
             let incoming = otherDeck, outgoing = deck
+            let rate = file.processingFormat.sampleRate
             incoming.reset()
             incoming.file = file
             reconnect(incoming, for: file.processingFormat)
-            schedule(incoming, from: 0)
-            incoming.timePitch.rate = Float(Self.tempoRatio(from: outgoingTrack, to: track))
+            // Where the plan has the incoming track now: the ticker may have started this a moment late.
+            let entry = plan.in_start + max(0, currentPosition() - plan.out_start) * plan.rate
+            schedule(incoming, from: AVAudioFramePosition(entry * rate))
+            incoming.timePitch.rate = Float(plan.rate)
             incoming.player.volume = 0
             incoming.player.play()
 
-            let start = ContinuousClock.now
+            // Follow the plan: gains, and keeping the incoming track on the beat.
+            let deadline = ContinuousClock.now + .seconds(plan.length + 5)
+            var p = plan
             while !Task.isCancelled {
-                let t = min(1, (ContinuousClock.now - start) / .seconds(length))
-                let gains = Crossfade.equalPowerGains(at: t)
-                outgoing.player.volume = gains.outgoing
-                incoming.player.volume = gains.incoming
-                if t >= 1 { break }
+                var step = MotifMixFollow()
+                let outPos = outgoing.position ?? position
+                motif_mix_follow(&p, outPos, incoming.position ?? entry, &step)
+                outgoing.player.volume = step.gain_out
+                incoming.player.volume = step.gain_in
+                if step.action == MOTIF_MIX_SEEK.rawValue {
+                    schedule(incoming, from: AVAudioFramePosition(max(0, step.value) * rate))
+                    incoming.player.play()
+                } else if abs(Double(incoming.timePitch.rate) - step.value) > 1e-4 {
+                    incoming.timePitch.rate = Float(step.value)
+                }
+                if step.progress >= 1 || ContinuousClock.now > deadline { break }
                 try? await Task.sleep(for: .milliseconds(30))
             }
             guard !Task.isCancelled else { return }
+            outgoing.player.volume = 0
+            incoming.player.volume = 1
 
             // Hand off: the incoming deck becomes the current track.
             outgoing.reset()
             active = 1 - active
             currentIndex = index
-            duration = Double(file.length) / file.processingFormat.sampleRate
+            duration = Double(file.length) / rate
             position = currentPosition()
             isMixing = false
             nowPlaying.update()

@@ -120,7 +120,7 @@ class MotifApp : Application() {
      */
     val dj: DjEngine by lazy {
         djStarted = true
-        DjEngine(this, library, scope, DjHistory(history, library, scope)) {
+        DjEngine(this, library, scope, DjHistory(history, library, scope) { account.historyPaused.value }) {
             playback.pause()
             sessionSource.value = SessionSource.Dj
         }.also { engine ->
