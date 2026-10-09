@@ -1,6 +1,6 @@
 # Listening history and the yearly recap
 
-Status: proposal, not implemented. Covers what Motif records and where each signal comes from. The recap itself (stats, story, animations) is a later design.
+Status: the log, sync, crates and `play` recording are built on iPhone, Mac and Android; the other event types below are still proposals. Covers what Motif records and where each signal comes from. The recap itself (stats, story, animations) is a later design.
 
 ## Goal
 
@@ -43,15 +43,9 @@ CREATE INDEX IF NOT EXISTS events_type_at ON events(type, at_ms);
 CREATE INDEX IF NOT EXISTS events_track ON events(track_key, at_ms);
 CREATE INDEX IF NOT EXISTS events_unsynced ON events(synced) WHERE synced = 0;
 
--- The play in progress, checkpointed every ~15 s. Not part of the log:
--- on launch, a leftover row becomes a 'play' event with end_reason 'interrupted'
--- (crash, OS kill, battery). Without it, every crash would lose a listen.
-CREATE TABLE IF NOT EXISTS open_play (
-    id          TEXT PRIMARY KEY,
-    payload     TEXT NOT NULL,
-    updated_ms  INTEGER NOT NULL
-);
 ```
+
+The play in progress is checkpointed every 15 s under the `open_play` key of `sync_state` (no table of its own). On launch, a leftover checkpoint becomes a `play` event with end_reason `interrupted` (crash, OS kill, battery). Without it, every crash would lose a listen.
 
 `tz_min` matters more than it looks: "you listen most at 11 p.m." needs local time as the user lived it, and people travel.
 
@@ -91,6 +85,8 @@ Every event also carries the envelope above (time, timezone, device, session). "
 | `shuffle`, `repeat` | mode at the time | queue settings (not built yet) |
 
 We store `listened_ms` and `end_reason` rather than a "counted as a play" flag. Whether a play counts at 30 s, 50 %, or something else is a recap-time decision we can change later.
+
+Built (v1, `schemas/events/play.v1.schema.json`): every field above except `control`, `route`, `output_rate`, `bit_perfect`, `shuffle` and `repeat`, which are optional and can be added later without a version bump. Each platform keeps a `PlaySession` per track that the player feeds with resume, pause, seek and position ticks; `schemas/fixtures/plays.json` pins how those become `listened_ms`, `paused_ms` and the rest, and both test suites run it. A play is written only if audio started and `listened_ms` > 0, and nothing is written or checkpointed while history is paused. During a Mix into next blend the incoming track's play starts with the blend (`mixed_in`, context `autoplay`) and the outgoing one ends `completed` with `mixed_out`. DJ Mix decks report each listen with context `mix`. A written play schedules an upload a minute later, so a run of plays goes up in one sync.
 
 **`seek`** is not its own event; the count on `play` is enough for any stat we can think of, and per-seek events would be the largest share of the log.
 

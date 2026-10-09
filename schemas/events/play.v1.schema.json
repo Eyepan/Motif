@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://motif.app/schemas/events/play.v1.schema.json",
+  "title": "play v1",
+  "description": "One playback of one track, written when it ends (docs/analytics.md). Raw facts only: whether a play 'counts' is decided at recap time from listened_ms and end_reason. The envelope's at_ms is when it ended and track_key is the track's content hash. How the fields are accumulated is pinned by schemas/fixtures/plays.json.",
+  "type": "object",
+  "required": ["track_id", "started_at_ms", "listened_ms", "end_reason", "context"],
+  "properties": {
+    "track_id": { "type": "string", "description": "Library track id on the device that played it. Use the envelope's track_key across devices." },
+    "started_at_ms": { "type": "integer", "description": "Unix ms when audio first started." },
+    "listened_ms": { "type": "integer", "minimum": 0, "description": "Track time actually played, excluding pauses and skipped-over spans." },
+    "start_pos_ms": { "type": "integer", "minimum": 0, "description": "Position in the track when audio started." },
+    "end_pos_ms": { "type": "integer", "minimum": 0, "description": "Position in the track when it ended." },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "end_reason": {
+      "enum": ["completed", "skipped", "previous", "stopped", "replaced", "error", "interrupted"],
+      "description": "completed: played to the end (or blended out by a mix). skipped: next. previous: back to the previous track. stopped: playback stopped or the track was removed. replaced: something else was started. error: playback failed. interrupted: the app ended mid-play and the last checkpoint was recovered on the next launch."
+    },
+    "seeks": { "type": "integer", "minimum": 0 },
+    "pauses": { "type": "integer", "minimum": 0 },
+    "paused_ms": { "type": "integer", "minimum": 0 },
+    "context": {
+      "enum": ["library", "album", "artist", "crate", "search", "queue", "autoplay", "mix"],
+      "description": "What started it. autoplay: the previous track finished. queue: picked from the up-next list. mix: a DJ Mix deck."
+    },
+    "context_ref": { "type": "string", "description": "Crate id when context is crate." },
+    "mixed_in": { "type": "boolean", "description": "Began in a blend from the previous track (Mix into next or DJ Mix)." },
+    "mixed_out": { "type": "boolean", "description": "Ended in a blend into the next track." }
+  },
+  "additionalProperties": true
+}

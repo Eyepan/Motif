@@ -39,6 +39,8 @@ final class AppModel {
     let store: LibraryStore
     let crateStore: CrateStore
     let player: PlaybackEngine
+    /// Writes plays to the listening history; DJ decks report to it too.
+    let plays: PlayRecorder
     let importer: ImportService
     let folderImporter: FolderImporter
     let sources: [any MusicSource]
@@ -79,6 +81,7 @@ final class AppModel {
         crateStore = CrateStore(history: history, library: store)
         account = AccountModel(history: history)
         player = PlaybackEngine(store: store)
+        plays = PlayRecorder(history: history, library: store)
         importer = ImportService(store: store)
         folderImporter = FolderImporter(importer: importer, store: store,
                                         stateFile: store.mediaDirectory.deletingLastPathComponent().appending(path: "folder-import.json"))
@@ -91,6 +94,13 @@ final class AppModel {
         #else
         watchedFolder = Self.resolveWatchedFolder()
         #endif
+        player.recorder = plays
+        plays.isPaused = { [account = self.account] in account.historyPaused }
+        plays.onRecorded = { [account = self.account] in
+            Task { await account.refreshCounts() }
+            account.syncSoon()
+            NotificationCenter.default.post(name: .historyDidSync, object: nil)
+        }
     }
 
     func setMixIntoNext(_ on: Bool) {

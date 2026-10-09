@@ -6,6 +6,8 @@ import android.provider.Settings
 import app.motif.data.HistoryStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -210,6 +212,25 @@ class AccountModel(private val context: Context, val history: HistoryStore, priv
         } finally {
             _state.update { it.copy(syncing = false, signedIn = api.isSignedIn) }
             refreshCounts()
+        }
+    }
+
+    private var pendingSync: Job? = null
+
+    /**
+     * A play was written: refresh the counts and history list, and upload a
+     * minute later so a run of plays goes up in one sync.
+     */
+    fun playRecorded() {
+        scope.launch {
+            refreshCounts()
+            _state.update { it.copy(historyRevision = it.historyRevision + 1) }
+            if (_state.value.signedIn && pendingSync?.isActive != true) {
+                pendingSync = launch {
+                    delay(60_000)
+                    sync()
+                }
+            }
         }
     }
 

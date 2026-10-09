@@ -201,6 +201,18 @@ final class AccountModel {
         await refreshCounts()
     }
 
+    private var pendingSync: Task<Void, Never>?
+
+    /// After a play is recorded: uploads a minute later, so a run of plays goes up in one sync.
+    func syncSoon() {
+        guard isSignedIn, pendingSync == nil else { return }
+        pendingSync = Task {
+            try? await Task.sleep(for: .seconds(60))
+            pendingSync = nil
+            await syncNow()
+        }
+    }
+
     func refreshCounts() async {
         unsyncedCount = (try? await history.unsyncedCount()) ?? 0
         playCount = (try? await history.count(types: ["play"])) ?? 0

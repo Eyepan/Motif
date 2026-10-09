@@ -25,7 +25,7 @@ struct MacAlbumGrid: View {
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
-                        Button("Play") { model.player.play(album.tracks) }
+                        Button("Play") { model.player.play(album.tracks, context: .album) }
                     }
                 }
             }
@@ -63,7 +63,7 @@ struct MacArtistList: View {
                 }
             }
             .contextMenu {
-                Button("Play") { model.player.play(artist.tracks) }
+                Button("Play") { model.player.play(artist.tracks, context: .artist) }
             }
         }
         .scrollContentBackground(.hidden)
