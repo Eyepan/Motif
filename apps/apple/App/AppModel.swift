@@ -39,6 +39,8 @@ final class AppModel {
     let store: LibraryStore
     let crateStore: CrateStore
     let player: PlaybackEngine
+    /// Writes plays to the listening history.
+    let plays: PlayRecorder
     /// DJ Mix decks. Starting a deck pauses regular playback and takes over the lock screen; playing music again hands it back.
     let dj: DJEngine
     let importer: ImportService
@@ -81,6 +83,7 @@ final class AppModel {
         crateStore = CrateStore(history: history, library: store)
         account = AccountModel(history: history)
         player = PlaybackEngine(store: store)
+        plays = PlayRecorder(history: history, library: store)
         dj = DJEngine(store: store, history: history)
         importer = ImportService(store: store)
         folderImporter = FolderImporter(importer: importer, store: store,
@@ -102,6 +105,13 @@ final class AppModel {
         #else
         watchedFolder = Self.resolveWatchedFolder()
         #endif
+        player.recorder = plays
+        plays.isPaused = { [account = self.account] in account.historyPaused }
+        plays.onRecorded = { [account = self.account] in
+            Task { await account.refreshCounts() }
+            account.syncSoon()
+            NotificationCenter.default.post(name: .historyDidSync, object: nil)
+        }
     }
 
     func setMixIntoNext(_ on: Bool) {

@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.MotifApp
 import app.motif.data.Crate
+import app.motif.data.PlayContext
 import app.motif.data.Track
 import app.motif.data.tracksByKey
 import app.motif.ui.theme.Motif
@@ -104,7 +105,7 @@ fun CratesScreen(
             songs = open.trackKeys.mapNotNull(byKey::get),
             current = current,
             onBack = { onOpen(null) },
-            onPlay = app::play,
+            onPlay = { list, index -> app.play(list, index, PlayContext.CRATE, open.id) },
             onRemove = { t -> edit { app.crates.remove(listOfNotNull(t.contentHash), open.id) } },
             onRename = { naming = CrateNaming.Rename(open) },
             onDelete = { onOpen(null); edit { app.crates.delete(open.id) } },
@@ -136,7 +137,7 @@ fun CratesScreen(
                             crate = crate,
                             byKey = byKey,
                             onOpen = { onOpen(crate.id) },
-                            onPlay = { app.play(crate.trackKeys.mapNotNull(byKey::get), 0) },
+                            onPlay = { app.play(crate.trackKeys.mapNotNull(byKey::get), 0, PlayContext.CRATE, crate.id) },
                             onRename = { naming = CrateNaming.Rename(crate) },
                             onDelete = { edit { app.crates.delete(crate.id) } },
                         )

@@ -18,7 +18,7 @@ struct PhoneSearchView: View {
                 .listRowBackground(Color.clear)
             } else {
                 ForEach(Array(results.enumerated()), id: \.element.id) { index, track in
-                    Button { model.player.play(results, startAt: index) } label: {
+                    Button { model.player.play(results, startAt: index, context: .search) } label: {
                         TrackRow(track: track, isCurrent: model.player.current?.id == track.id)
                     }
                     .buttonStyle(.plain)

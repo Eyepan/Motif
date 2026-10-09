@@ -8,6 +8,8 @@ import app.motif.data.ArtworkStore
 import app.motif.data.CrateStore
 import app.motif.data.HistoryStore
 import app.motif.data.LibraryStore
+import app.motif.data.PlayContext
+import app.motif.data.PlayRecorder
 import app.motif.data.Track
 import app.motif.dsp.MotifDsp
 import app.motif.importer.Downloads
@@ -102,10 +104,15 @@ class MotifApp : Application() {
 
     val previewer by lazy { Previewer(this) }
 
+    /** Writes plays to the listening history. */
+    val plays: PlayRecorder by lazy {
+        PlayRecorder(history, library, scope, isPaused = { account.historyPaused.value }, onRecorded = { account.playRecorded() })
+    }
+
     val playback: PlaybackEngine by lazy {
         PlaybackEngine(this, library, artwork, scope, prefs.getBoolean(KEY_MIX, false)) { on ->
             prefs.edit().putBoolean(KEY_MIX, on).apply()
-        }
+        }.also { it.recorder = plays }
     }
 
     private var djStarted = false
@@ -138,10 +145,10 @@ class MotifApp : Application() {
     /** The DJ decks as one player, for the media session. */
     val djSessionPlayer: DjSessionPlayer by lazy { DjSessionPlayer(dj, scope) }
 
-    fun play(tracks: List<Track>, startAt: Int) {
+    fun play(tracks: List<Track>, startAt: Int, context: PlayContext = PlayContext.LIBRARY, contextRef: String? = null) {
         if (djStarted) dj.stopForPlayback()
         sessionSource.value = SessionSource.Playback
-        playback.play(tracks, startAt)
+        playback.play(tracks, startAt, context, contextRef)
     }
 
     fun delete(track: Track) {

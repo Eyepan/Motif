@@ -54,6 +54,9 @@ public final class PlaybackEngine {
     /// Largest tempo change applied to the incoming track, as a fraction.
     public nonisolated static let maxTempoAdjust = 0.08
 
+    /// Receives finished plays and checkpoints of the one in progress (listening history).
+    @ObservationIgnored public var recorder: PlayRecorder?
+
     private let store: LibraryStore
     private let engine = AVAudioEngine()
     @ObservationIgnored private var decks: [Deck] = []
@@ -62,6 +65,11 @@ public final class PlaybackEngine {
     @ObservationIgnored private var mixTask: Task<Void, Never>?
     @ObservationIgnored private var nowPlaying: NowPlayingController!
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    /// The current track's play, and the incoming track's while a blend runs.
+    @ObservationIgnored private var openPlay: PlaySession?
+    @ObservationIgnored private var mixPlay: PlaySession?
+    /// What started the queue, for the tracks next and previous move to.
+    @ObservationIgnored private var queueContext: (PlayContext, String?) = (.library, nil)
 
     private var deck: Deck { decks[active] }
     private var otherDeck: Deck { decks[1 - active] }
@@ -82,10 +90,13 @@ public final class PlaybackEngine {
 
     // MARK: - Transport
 
-    public func play(_ tracks: [Track], startAt index: Int = 0) {
+    /// `context` says what started playback, for listening history; `.queue` keeps the queue's own.
+    public func play(_ tracks: [Track], startAt index: Int = 0, context: PlayContext = .library, contextRef: String? = nil) {
         guard tracks.indices.contains(index) else { return }
+        endPlay(.replaced)
+        if context != .queue { queueContext = (context, contextRef) }
         queue = tracks
-        load(index: index, autoplay: true)
+        load(index: index, autoplay: true, context: (context, context == .queue ? nil : contextRef))
     }
 
     public func togglePlayPause() {
@@ -103,9 +114,13 @@ public final class PlaybackEngine {
             deck.player.play()
             if isMixing { otherDeck.player.play() }
             state = .playing
+            let now = PlayRecorder.nowMs
+            openPlay?.resume(at: now, pos: Self.ms(currentPosition()))
+            if isMixing { mixPlay?.resume(at: now, pos: Self.ms(otherDeck.position ?? 0)) }
             startTicker()
         } catch {
             lastError = error.localizedDescription
+            endPlay(.error)
         }
         nowPlaying.update()
     }
@@ -113,6 +128,9 @@ public final class PlaybackEngine {
     public func pause() {
         guard state == .playing else { return }
         position = currentPosition()
+        let now = PlayRecorder.nowMs
+        openPlay?.pause(at: now, pos: Self.ms(position))
+        if isMixing { mixPlay?.pause(at: now, pos: Self.ms(otherDeck.position ?? 0)) }
         deck.player.pause()
         if isMixing { otherDeck.player.pause() }
         state = .paused
@@ -121,8 +139,9 @@ public final class PlaybackEngine {
     }
 
     public func next() {
+        endPlay(.skipped)
         guard let i = currentIndex, i + 1 < queue.count else { stop(); return }
-        load(index: i + 1, autoplay: state == .playing)
+        load(index: i + 1, autoplay: state == .playing, context: queueContext)
     }
 
     /// Restarts the current track if more than 3 s in, like every other player.
@@ -131,7 +150,8 @@ public final class PlaybackEngine {
         if currentPosition() > 3 || i == 0 {
             seek(to: 0)
         } else {
-            load(index: i - 1, autoplay: state == .playing)
+            endPlay(.previous)
+            load(index: i - 1, autoplay: state == .playing, context: queueContext)
         }
     }
 
@@ -141,6 +161,7 @@ public final class PlaybackEngine {
         let rate = file.processingFormat.sampleRate
         let frame = AVAudioFramePosition(max(0, min(seconds, duration)) * rate)
         let wasPlaying = state == .playing
+        openPlay?.seek(at: PlayRecorder.nowMs, from: Self.ms(currentPosition()), to: Self.ms(Double(frame) / rate))
         schedule(deck, from: frame)
         position = Double(frame) / rate
         if wasPlaying { deck.player.play() }
@@ -148,6 +169,7 @@ public final class PlaybackEngine {
     }
 
     public func stop() {
+        endPlay(.stopped)
         cancelMix()
         deck.reset()
         ticker?.cancel()
@@ -159,7 +181,7 @@ public final class PlaybackEngine {
 
     // MARK: - Loading and scheduling
 
-    private func load(index: Int, autoplay: Bool) {
+    private func load(index: Int, autoplay: Bool, context: (PlayContext, String?)) {
         cancelMix()
         let track = queue[index]
         Task {
@@ -174,6 +196,8 @@ public final class PlaybackEngine {
                 schedule(deck, from: 0)
                 position = 0
                 lastError = nil
+                openPlay = PlaySession(trackID: PlayRecorder.trackID(track), durationMs: Self.ms(duration),
+                                       context: context.0, contextRef: context.1)
                 if autoplay { resume() } else { state = .paused; nowPlaying.update() }
             } catch {
                 lastError = "Couldn't open \(track.title): \(error.localizedDescription)"
@@ -216,7 +240,23 @@ public final class PlaybackEngine {
     private func segmentFinished(_ finished: Deck, token: Int) {
         // Ignore stale callbacks (stop, seek) and the outgoing deck of a blend, which hands off on its own.
         guard token == finished.generation, finished === deck, !isMixing else { return }
-        next()
+        endPlay(.completed, at: duration)
+        guard let i = currentIndex, i + 1 < queue.count else { stop(); return }
+        load(index: i + 1, autoplay: state == .playing, context: (.autoplay, nil))
+    }
+
+    // MARK: - Listening history
+
+    private nonisolated static func ms(_ seconds: TimeInterval) -> Int64 { Int64((seconds * 1000).rounded()) }
+
+    /// Ends the current track's play and hands it to the recorder.
+    private func endPlay(_ reason: PlayEndReason, at seconds: TimeInterval? = nil, mixedOut: Bool = false) {
+        guard var session = openPlay else { return }
+        openPlay = nil
+        guard let track = current,
+              let payload = session.end(at: PlayRecorder.nowMs, pos: Self.ms(seconds ?? currentPosition()),
+                                        reason: reason, mixedOut: mixedOut) else { return }
+        recorder?.finish(payload, track: track)
     }
 
     private func currentPosition() -> TimeInterval {
@@ -239,6 +279,11 @@ public final class PlaybackEngine {
             while !Task.isCancelled {
                 guard let self else { return }
                 self.position = self.currentPosition()
+                if self.state == .playing, var session = self.openPlay {
+                    session.progress(at: PlayRecorder.nowMs, pos: Self.ms(self.position))
+                    self.openPlay = session
+                    self.recorder?.checkpoint(session)
+                }
                 self.startMixIfDue()
                 try? await Task.sleep(for: .milliseconds(250))
             }
@@ -284,6 +329,9 @@ public final class PlaybackEngine {
             incoming.timePitch.rate = Float(plan.rate)
             incoming.player.volume = 0
             incoming.player.play()
+            mixPlay = PlaySession(trackID: PlayRecorder.trackID(track), durationMs: Self.ms(Double(file.length) / file.processingFormat.sampleRate),
+                                  context: .autoplay, mixedIn: true)
+            if state == .playing { mixPlay?.resume(at: PlayRecorder.nowMs, pos: Self.ms(entry)) }
 
             // Follow the plan: gains, and keeping the incoming track on the beat.
             let deadline = ContinuousClock.now + .seconds(plan.length + 5)
@@ -300,6 +348,7 @@ public final class PlaybackEngine {
                 } else if abs(Double(incoming.timePitch.rate) - step.value) > 1e-4 {
                     incoming.timePitch.rate = Float(step.value)
                 }
+                if state == .playing { mixPlay?.progress(at: PlayRecorder.nowMs, pos: Self.ms(incoming.position ?? 0)) }
                 if step.progress >= 1 || ContinuousClock.now > deadline { break }
                 try? await Task.sleep(for: .milliseconds(30))
             }
@@ -308,9 +357,12 @@ public final class PlaybackEngine {
             incoming.player.volume = 1
 
             // Hand off: the incoming deck becomes the current track.
+            endPlay(.completed, at: outgoing.position ?? duration, mixedOut: true)
             outgoing.reset()
             active = 1 - active
             currentIndex = index
+            openPlay = mixPlay
+            mixPlay = nil
             duration = Double(file.length) / rate
             position = currentPosition()
             isMixing = false
@@ -329,6 +381,7 @@ public final class PlaybackEngine {
     private func cancelMix() {
         mixTask?.cancel()
         mixTask = nil
+        mixPlay = nil
         if isMixing { otherDeck.reset() }
         isMixing = false
         deck.player.volume = 1
