@@ -452,6 +452,18 @@ class DjEngine(
             .send()
     }
 
+    /** Backstop for the loop message: a deck that ran past its loop end goes back, keeping the overshoot. */
+    private fun holdLoops() {
+        for (id in DeckId.entries) {
+            val loop = _state.value[id].loop ?: continue
+            val p = players[id] ?: continue
+            val pos = p.currentPosition
+            if (p.isPlaying && pos >= loop.endMs) {
+                p.seekTo(loop.startMs + (pos - loop.startMs) % (loop.endMs - loop.startMs))
+            }
+        }
+    }
+
     private fun clearLoop(id: DeckId) {
         loopMessages.remove(id)?.cancel()
         if (_state.value[id].loop != null) updateDeck(id) { it.copy(loop = null) }
@@ -507,6 +519,7 @@ class DjEngine(
         if (ticker?.isActive == true) return
         ticker = scope.launch {
             while (isActive && (players.values.any { it.isPlaying } || _state.value.blend != null)) {
+                holdLoops()
                 publish()
                 stepBlend()
                 DeckId.entries.firstOrNull { _state.value[it].synced }?.let { id ->
