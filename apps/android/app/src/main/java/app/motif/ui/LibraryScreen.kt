@@ -50,10 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.motif.data.Crate
 import app.motif.data.LibraryFilter
+import app.motif.data.LibraryIndex
 import app.motif.data.PlayContext
 import app.motif.data.Track
-import app.motif.data.albumsOf
-import app.motif.data.artistsOf
 import app.motif.data.tracksByKey
 import app.motif.ui.theme.Motif
 
@@ -71,6 +70,8 @@ fun LibraryScreen(
     crates: List<Crate>,
     onAddToCrate: (Track) -> Unit,
     onOpenCrate: (Crate) -> Unit,
+    index: LibraryIndex,
+    onOpen: (LibraryPage) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,8 +79,8 @@ fun LibraryScreen(
     var query by rememberSaveable { mutableStateOf("") }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val songs = remember(tracks, query) { LibraryFilter(query).let { f -> tracks.filter(f::matches) } }
-    val albums = remember(tracks) { albumsOf(tracks) }
-    val artists = remember(tracks) { artistsOf(tracks) }
+    val albums = index.albums
+    val artists = index.artists
     val byKey = remember(tracks) { tracksByKey(tracks) }
 
     Column(modifier.nestedScroll(scroll.nestedScrollConnection)) {
@@ -135,7 +136,7 @@ fun LibraryScreen(
                         item {
                             LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(albums.take(10), key = { it.key }) { album ->
-                                    AlbumTile(album.title, album.artist, album.tracks[0].monogram, album.tracks.map { it.id }) { onPlay(album.tracks, 0, PlayContext.ALBUM) }
+                                    AlbumTile(album.title, album.artist, album.tracks[0].monogram, album.tracks.map { it.id }) { onOpen(LibraryPage.AlbumPage(album.key)) }
                                 }
                             }
                         }
@@ -159,16 +160,17 @@ fun LibraryScreen(
                         supportingContent = { Text("${album.artist ?: "Unknown artist"} · ${album.tracks.size} songs") },
                         leadingContent = { ArtTile(album.title, album.tracks[0].monogram, size = 56.dp, radius = 8.dp, artIds = album.tracks.map { it.id }) },
                         colors = ListItemDefaults.colors(containerColor = Motif.ground),
-                        modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(album.tracks, 0, PlayContext.ALBUM) },
+                        modifier = Modifier.padding(horizontal = 4.dp).clickable(onClickLabel = "Open album") { onOpen(LibraryPage.AlbumPage(album.key)) },
                     )
                 }
                 Segment.Artists -> {
                     items(artists, key = { it.key }) { artist ->
                         ListItem(
                             headlineContent = { Text(artist.name) },
+                            leadingContent = { ArtTile(artist.name, artist.monogram, size = 40.dp, radius = 20.dp, artIds = artist.tracks.map { it.id }) },
                             trailingContent = { Text("${artist.tracks.size}", color = Motif.secondary) },
                             colors = ListItemDefaults.colors(containerColor = Motif.ground),
-                            modifier = Modifier.padding(horizontal = 4.dp).clickable { onPlay(artist.tracks, 0, PlayContext.ARTIST) },
+                            modifier = Modifier.padding(horizontal = 4.dp).clickable(onClickLabel = "Open artist") { onOpen(LibraryPage.ArtistPage(artist.key)) },
                         )
                     }
                 }

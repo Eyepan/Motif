@@ -9,19 +9,19 @@ struct PhoneRootView: View {
         @Bindable var model = model
         @Bindable var account = model.account
         TabView(selection: $model.phoneTab) {
-            NavigationStack { PhoneLibraryView() }
+            NavigationStack(path: model.path(for: .library)) { PhoneLibraryView().libraryDestinations() }
                 .withMiniPlayer()
                 .tabItem { Label("Library", systemImage: "music.note.list") }
                 .tag(AppModel.PhoneTab.library)
-            NavigationStack { PhoneCratesView() }
+            NavigationStack(path: model.path(for: .crates)) { PhoneCratesView().libraryDestinations() }
             .withMiniPlayer()
             .tabItem { Label("Crates", systemImage: "square.stack") }
             .tag(AppModel.PhoneTab.crates)
-            NavigationStack { DJMixView().navigationBarTitleDisplayMode(.inline) }
+            NavigationStack(path: model.path(for: .mix)) { DJMixView().navigationBarTitleDisplayMode(.inline).libraryDestinations() }
             .withMiniPlayer()
             .tabItem { Label("Mix", systemImage: "dial.medium") }
             .tag(AppModel.PhoneTab.mix)
-            NavigationStack { PhoneSearchView() }
+            NavigationStack(path: model.path(for: .search)) { PhoneSearchView().libraryDestinations() }
                 .withMiniPlayer()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
                 .tag(AppModel.PhoneTab.search)

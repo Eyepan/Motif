@@ -26,10 +26,14 @@ struct PhoneLibraryView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 12) {
                                 ForEach(model.albums.prefix(10)) { album in
-                                    Button { model.player.play(album.tracks, context: .album) } label: {
+                                    NavigationLink(value: LibraryRoute.album(album.id)) {
                                         AlbumTile(title: album.title, artist: album.artist, letter: album.tracks[0].monogram, artwork: album.artwork)
                                     }
                                     .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button("Play", systemImage: "play.fill") { model.player.play(album.tracks, context: .album) }
+                                        TrackMenuItems(tracks: album.tracks)
+                                    }
                                 }
                             }
                             .padding(.horizontal, 20)
@@ -51,6 +55,7 @@ struct PhoneLibraryView: View {
                             Button("Delete", role: .destructive) { Task { await model.delete(track) } }
                         }
                         .contextMenu {
+                            TrackMenuItems(tracks: [track])
                             AddToCrateMenu(tracks: [track])
                             Button("Delete from Library", role: .destructive) { Task { await model.delete(track) } }
                         }
@@ -60,7 +65,7 @@ struct PhoneLibraryView: View {
                 }
             case .albums:
                 ForEach(model.albums) { album in
-                    Button { model.player.play(album.tracks, context: .album) } label: {
+                    NavigationLink(value: LibraryRoute.album(album.id)) {
                         HStack(spacing: 12) {
                             ArtTile(seed: album.title, letter: album.tracks[0].monogram, size: 56, radius: 8, artwork: album.artwork)
                             VStack(alignment: .leading, spacing: 2) {
@@ -70,15 +75,27 @@ struct PhoneLibraryView: View {
                             }
                         }
                     }
-                    .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
+                    .contextMenu {
+                        Button("Play", systemImage: "play.fill") { model.player.play(album.tracks, context: .album) }
+                        TrackMenuItems(tracks: album.tracks)
+                    }
                 }
             case .artists:
                 ForEach(model.artists) { artist in
-                    Button { model.player.play(artist.tracks, context: .artist) } label: {
-                        LabeledContent(artist.name, value: "\(artist.tracks.count)")
+                    NavigationLink(value: LibraryRoute.artist(artist.id)) {
+                        HStack(spacing: 12) {
+                            ArtTile(seed: artist.name, letter: artist.monogram, size: 40, radius: 20, artwork: model.artwork(for: artist))
+                            Text(artist.name).foregroundStyle(Theme.text)
+                            Spacer()
+                            Text("\(artist.tracks.count)").monospacedDigit().foregroundStyle(Theme.secondary)
+                        }
                     }
                     .listRowBackground(Color.clear)
+                    .contextMenu {
+                        Button("Play", systemImage: "play.fill") { model.player.play(artist.tracks, context: .artist) }
+                        TrackMenuItems(tracks: artist.tracks)
+                    }
                 }
             case .crates:
                 if model.crates.isEmpty {

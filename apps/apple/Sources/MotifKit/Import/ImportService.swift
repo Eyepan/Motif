@@ -145,7 +145,7 @@ public struct ImportService: Sendable {
     public func probe(_ file: URL, source: Track.Source = .local, sourceRef: String? = nil, licenseURL: URL? = nil,
                       fallbackTitle: String? = nil) async throws -> Probe {
         let ext = file.pathExtension.lowercased()
-        let raw = await Self.tags(of: file)
+        let (raw, position) = await Self.tags(of: file)
         let audio = try AVAudioFile(forReading: file)
         let format = audio.fileFormat
         var suffixes = await store.siteSuffixes
@@ -164,7 +164,9 @@ public struct ImportService: Sendable {
             source: source,
             sourceRef: sourceRef,
             licenseURL: licenseURL,
-            albumArtist: albumArtist
+            albumArtist: albumArtist,
+            trackNumber: position.track,
+            discNumber: position.disc
         )
         let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         return Probe(file: file, track: track, raw: raw, fileBytes: bytes)
@@ -258,9 +260,16 @@ public struct ImportService: Sendable {
         }
     }
 
-    /// Title, artist, album and album artist as tagged. Album artist has no common
-    /// identifier, so it's looked up by the key each tag format uses.
-    static func tags(of url: URL) async -> RawTags {
+    /// Where a track sits on its album, as tagged.
+    public struct AlbumPosition: Sendable, Equatable {
+        public var track: Int?
+        public var disc: Int?
+    }
+
+    /// Title, artist, album and album artist as tagged, and the track and disc numbers.
+    /// Album artist and the numbers have no common identifier, so they're looked up by
+    /// the key each tag format uses.
+    static func tags(of url: URL) async -> (RawTags, AlbumPosition) {
         let asset = AVURLAsset(url: url)
         let common = (try? await asset.load(.commonMetadata)) ?? []
         let all = (try? await asset.load(.metadata)) ?? []
@@ -274,19 +283,56 @@ public struct ImportService: Sendable {
             return await text(item)
         }
         var albumArtist: String?
+        var position = AlbumPosition()
         for item in all {
-            let key = (item.key as? String ?? item.identifier?.rawValue ?? "").lowercased()
-            if item.identifier == .iTunesMetadataAlbumArtist || item.identifier == .id3MetadataBand
-                || albumArtistKeys.contains(key) || albumArtistKeys.contains(where: { key.hasSuffix("/\($0)") }) {
+            let key = Self.tagKey(item)
+            if albumArtist == nil, item.identifier == .iTunesMetadataAlbumArtist || item.identifier == .id3MetadataBand
+                || Self.matches(key, albumArtistKeys) {
                 albumArtist = await text(item)
-                if albumArtist != nil { break }
+            } else if position.track == nil, item.identifier == .iTunesMetadataTrackNumber
+                || item.identifier == .id3MetadataTrackNumber || Self.matches(key, trackNumberKeys) {
+                position.track = await number(item)
+            } else if position.disc == nil, item.identifier == .iTunesMetadataDiscNumber
+                || item.identifier == .id3MetadataPartOfASet || Self.matches(key, discNumberKeys) {
+                position.disc = await number(item)
             }
         }
-        return RawTags(title: await value(.commonIdentifierTitle),
-                       artist: await value(.commonIdentifierArtist),
-                       album: await value(.commonIdentifierAlbumName),
-                       albumArtist: albumArtist)
+        let raw = RawTags(title: await value(.commonIdentifierTitle),
+                          artist: await value(.commonIdentifierArtist),
+                          album: await value(.commonIdentifierAlbumName),
+                          albumArtist: albumArtist)
+        return (raw, position)
     }
+
+    /// Just the track and disc numbers, for tracks imported before they were kept.
+    public static func albumPosition(of url: URL) async -> AlbumPosition {
+        await tags(of: url).1
+    }
+
+    private static func tagKey(_ item: AVMetadataItem) -> String {
+        (item.key as? String ?? item.identifier?.rawValue ?? "").lowercased()
+    }
+
+    private static func matches(_ key: String, _ names: Set<String>) -> Bool {
+        names.contains(key) || names.contains(where: { key.hasSuffix("/\($0)") })
+    }
+
+    /// "3", "3/12" or "03"; or MP4's binary trkn/disk atom (number in bytes 2-3).
+    private static func number(_ item: AVMetadataItem) async -> Int? {
+        if let string = try? await item.load(.stringValue) {
+            let lead = string.trimmingCharacters(in: .whitespaces).prefix { $0.isNumber }
+            if let n = Int(lead), n > 0 { return n }
+        }
+        if let data = try? await item.load(.dataValue), data.count >= 4 {
+            let bytes = [UInt8](data)
+            let n = Int(bytes[2]) << 8 | Int(bytes[3])
+            return n > 0 ? n : nil
+        }
+        return nil
+    }
+
+    private static let trackNumberKeys: Set<String> = ["tracknumber", "track", "trck", "trkn"]
+    private static let discNumberKeys: Set<String> = ["discnumber", "disc", "tpos", "disk"]
 
     /// Vorbis comment (FLAC) and other spellings of the album artist key.
     private static let albumArtistKeys: Set<String> = ["albumartist", "album artist", "album_artist", "tpe2", "aart"]

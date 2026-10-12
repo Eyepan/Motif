@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,11 +48,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.data.ArtworkStore
+import app.motif.data.LibraryIndex
 import app.motif.data.Track
+import app.motif.data.UNKNOWN_ARTIST_KEY
 import app.motif.playback.MixMatch
 import app.motif.ui.theme.Motif
 import kotlinx.coroutines.Dispatchers
@@ -161,9 +165,14 @@ fun TrackRow(
     mixWith: Track? = null,
     onAddToCrate: (() -> Unit)? = null,
     onRemoveFromCrate: (() -> Unit)? = null,
+    /** On an album page: leave out Go to album. */
+    hideAlbum: Boolean = false,
+    /** On an artist page: leave out going to that artist. */
+    hideArtistKey: String? = null,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val hasMenu = onDelete != null || onAddToCrate != null || onRemoveFromCrate != null
+    val actions = LocalLibraryActions.current
+    val hasMenu = actions != null || onDelete != null || onAddToCrate != null || onRemoveFromCrate != null
     val other = mixWith?.takeIf { it.id != track.id }
     val tempoMatch = other != null && MixMatch.tempos(other, track)
     val keyMatch = other != null && MixMatch.keys(other, track)
@@ -205,6 +214,7 @@ fun TrackRow(
         }
         if (hasMenu) {
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                TrackMenuItems(listOf(track), onDone = { menu = false }, hideAlbum = hideAlbum, hideArtistKey = hideArtistKey)
                 onAddToCrate?.let { add ->
                     DropdownMenuItem(text = { Text("Add to crate") }, onClick = { menu = false; add() })
                 }
@@ -283,6 +293,80 @@ fun WaveformScrubber(
                 topLeft = Offset(i * (w + gap), (size.height - h) / 2),
                 size = Size(w, h),
                 cornerRadius = CornerRadius(1.dp.toPx()),
+            )
+        }
+    }
+}
+
+/** Queueing and album / artist pages, for track menus anywhere in the app. Provided by MotifRoot. */
+class LibraryActions(
+    val index: LibraryIndex,
+    val open: (LibraryPage) -> Unit,
+    val playNext: (List<Track>) -> Unit,
+    val addToQueue: (List<Track>) -> Unit,
+    val addToCrate: (List<Track>) -> Unit,
+)
+
+val LocalLibraryActions = compositionLocalOf<LibraryActions?> { null }
+
+/** Play next, Add to queue, Go to album and Go to artist, for a DropdownMenu. [onDone] closes the menu. */
+@Composable
+fun TrackMenuItems(tracks: List<Track>, onDone: () -> Unit, hideAlbum: Boolean = false, hideArtistKey: String? = null) {
+    val actions = LocalLibraryActions.current ?: return
+    DropdownMenuItem(text = { Text("Play next") }, onClick = { onDone(); actions.playNext(tracks) })
+    DropdownMenuItem(text = { Text("Add to queue") }, onClick = { onDone(); actions.addToQueue(tracks) })
+    val track = tracks.singleOrNull() ?: return
+    if (!hideAlbum) {
+        actions.index.albumOf(track)?.let { album ->
+            DropdownMenuItem(text = { Text("Go to album") }, onClick = { onDone(); actions.open(LibraryPage.AlbumPage(album.key)) })
+        }
+    }
+    val artists = actions.index.creditedArtists(track).filter { it.key != hideArtistKey && it.key != UNKNOWN_ARTIST_KEY }
+    for (artist in artists) {
+        DropdownMenuItem(
+            text = { Text(if (artists.size == 1) "Go to artist" else "Go to ${artist.name}") },
+            onClick = { onDone(); actions.open(LibraryPage.ArtistPage(artist.key)) },
+        )
+    }
+}
+
+/**
+ * "Artist · Album" with each name opening its page. A credit naming several
+ * artists opens a menu to pick one. Plain text without [LocalLibraryActions].
+ */
+@Composable
+fun CreditLinks(track: Track, fontSize: TextUnit, color: Color, modifier: Modifier = Modifier) {
+    val actions = LocalLibraryActions.current
+    val artists = actions?.index?.creditedArtists(track).orEmpty().filter { it.key != UNKNOWN_ARTIST_KEY }
+    val album = actions?.index?.albumOf(track)
+    var picking by remember { mutableStateOf(false) }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f, fill = false)) {
+            Text(
+                track.artist ?: "Unknown artist",
+                fontSize = fontSize, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = if (actions == null || artists.isEmpty()) Modifier else Modifier.clickable(onClickLabel = "Open artist") {
+                    if (artists.size == 1) actions.open(LibraryPage.ArtistPage(artists[0].key)) else picking = true
+                },
+            )
+            DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                for (artist in artists) {
+                    DropdownMenuItem(
+                        text = { Text(artist.name) },
+                        onClick = { picking = false; actions?.open(LibraryPage.ArtistPage(artist.key)) },
+                    )
+                }
+            }
+        }
+        track.album?.let { name ->
+            Text(" · ", fontSize = fontSize, color = color)
+            Text(
+                name,
+                fontSize = fontSize, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).then(
+                    if (actions == null || album == null) Modifier
+                    else Modifier.clickable(onClickLabel = "Open album") { actions.open(LibraryPage.AlbumPage(album.key)) },
+                ),
             )
         }
     }

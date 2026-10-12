@@ -31,6 +31,7 @@ struct MotifApp: App {
                 await model.account.start()
                 model.startWatchingFolder()
                 await model.backfillArtwork()
+                await model.backfillTrackNumbers()
                 await model.analyzeMissing()
             }
             .onChange(of: scenePhase) { _, phase in

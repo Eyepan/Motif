@@ -21,6 +21,7 @@ object TestAudio {
     fun writeFlac(
         file: File, title: String, artist: String, album: String, bpm: Double = 120.0, seconds: Double = 8.0,
         sampleRate: Int = SAMPLE_RATE,
+        trackNumber: Int? = null,
     ) {
         val frames = (sampleRate * seconds).toInt()
         val samples = beat(frames, bpm, sampleRate)
@@ -28,7 +29,7 @@ object TestAudio {
         out.write("fLaC".toByteArray())
         out.write(blockHeader(last = false, type = 0, length = 34))
         out.write(streamInfo(frames, sampleRate))
-        val tags = vorbisComment(listOf("TITLE=$title", "ARTIST=$artist", "ALBUM=$album"))
+        val tags = vorbisComment(listOfNotNull("TITLE=$title", "ARTIST=$artist", "ALBUM=$album", trackNumber?.let { "TRACKNUMBER=$it" }))
         out.write(blockHeader(last = true, type = 4, length = tags.size))
         out.write(tags)
         var start = 0

@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -108,6 +109,33 @@ class LibraryFlowTest {
         Screenshots.take("03-library-albums")
     }
 
+    @Test fun albumPagePlaysInTrackOrderAndQueues() {
+        importDirectly()
+        assertEquals(1, app.library.tracks.value.first { it.title == "Neon Glide" }.trackNumber)
+
+        compose.onNodeWithText("Albums").performClick()
+        compose.onNodeWithText("Night Drive").performClick()
+        // Tagged track numbers, not file or import order.
+        compose.onNodeWithContentDescription("1, Neon Glide", substring = true).assertExists()
+        compose.onNodeWithContentDescription("3, Afterglow", substring = true).assertExists()
+        Screenshots.take("06-album")
+
+        compose.onNodeWithContentDescription("2, Slow Burn", substring = true).performClick()
+        compose.waitUntil(15_000) { app.playback.state.value.current?.title == "Slow Burn" }
+        assertEquals(listOf("Neon Glide", "Slow Burn", "Afterglow"), app.playback.state.value.queue.map { it.title })
+
+        compose.onNodeWithContentDescription("1, Neon Glide", substring = true).performTouchInput { longClick() }
+        compose.onNodeWithText("Add to queue").performClick()
+        compose.waitUntil(5_000) { app.playback.state.value.queue.size == 4 }
+        assertEquals("Neon Glide", app.playback.state.value.queue.last().title)
+
+        // The album's artist opens their page.
+        // Unmerged, so the mini player's artist line doesn't match too.
+        compose.onNode(hasText("Motif Test Band") and hasClickAction(), useUnmergedTree = true).performClick()
+        compose.onNodeWithText("1 album · 3 songs").assertExists()
+        Screenshots.take("07-artist")
+    }
+
     @Test fun playTrackFromLibrary() {
         importDirectly()
 
@@ -169,20 +197,21 @@ class LibraryFlowTest {
 
     private fun fixtureFile(title: String) = File(app.cacheDir, "fixtures/" + FIXTURES.first { it.title == title }.path).path
 
-    private class Fixture(val path: String, val title: String, val artist: String, val album: String, val bpm: Double)
+    private class Fixture(val path: String, val title: String, val artist: String, val album: String, val bpm: Double, val number: Int? = null)
 
     private companion object {
         val FIXTURES = listOf(
-            Fixture("Night Drive/01 Afterglow.flac", "Afterglow", "Motif Test Band", "Night Drive", 120.0),
-            Fixture("Night Drive/02 Neon Glide.flac", "Neon Glide", "Motif Test Band", "Night Drive", 124.0),
-            Fixture("Night Drive/03 Slow Burn.flac", "Slow Burn", "Motif Test Band", "Night Drive", 96.0),
+            // Numbered against file order, so album order can only come from the tags.
+            Fixture("Night Drive/01 Afterglow.flac", "Afterglow", "Motif Test Band", "Night Drive", 120.0, number = 3),
+            Fixture("Night Drive/02 Neon Glide.flac", "Neon Glide", "Motif Test Band", "Night Drive", 124.0, number = 1),
+            Fixture("Night Drive/03 Slow Burn.flac", "Slow Burn", "Motif Test Band", "Night Drive", 96.0, number = 2),
             Fixture("Night Drive/B-sides/01 Morning Static.flac", "Morning Static", "Other Artist", "Daylight", 128.0),
             Fixture("Night Drive/B-sides/02 Sunlit.flac", "Sunlit", "Other Artist", "Daylight", 110.0),
         )
 
         fun writeFixtures(dir: File) {
             dir.deleteRecursively()
-            FIXTURES.forEach { TestAudio.writeFlac(File(dir, it.path), it.title, it.artist, it.album, it.bpm) }
+            FIXTURES.forEach { TestAudio.writeFlac(File(dir, it.path), it.title, it.artist, it.album, it.bpm, trackNumber = it.number) }
             // Not audio: the importer should skip it.
             File(dir, "Night Drive/notes.txt").writeText("liner notes")
         }

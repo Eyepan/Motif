@@ -23,6 +23,10 @@ struct PhoneSearchView: View {
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Color.clear)
+                    .contextMenu {
+                        TrackMenuItems(tracks: [track])
+                        AddToCrateMenu(tracks: [track])
+                    }
                 }
             }
             Section {
