@@ -102,7 +102,8 @@ struct MacLibraryTable: View {
                 }
             } primaryAction: { ids in
                 play(ids, in: rows)
-                  }
+            }
+        }
         .overlay {
             if model.tracks.isEmpty {
                 ContentUnavailableView {
