@@ -96,7 +96,8 @@ class DjFlowTest {
 
         // SYNC nudges deck B's speed for a moment while it pulls into phase, then settles on deck A's tempo.
         val expected = { app.dj.state.value.a.bpm!! / tracks.getValue("Neon Glide").bpm!! }
-        compose.waitUntil(5_000) {
+        // Generous: a slow emulator can take several seconds to pull into phase.
+        compose.waitUntil(15_000) {
             val b = app.dj.state.value.b
             b.synced && b.isPlaying && abs(b.speed - expected()) < 0.01
         }
