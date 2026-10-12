@@ -49,6 +49,9 @@ class MotifApp : Application() {
                 if (!prefs.getBoolean(KEY_GRIDS_BACKFILLED, false) && MotifDsp.available) {
                     importer.backfillBeatGrids(store.tracks.value) { prefs.edit().putBoolean(KEY_GRIDS_BACKFILLED, true).apply() }
                 }
+                if (!prefs.getBoolean(KEY_NUMBERS_BACKFILLED, false)) {
+                    importer.backfillTrackNumbers(store.tracks.value) { prefs.edit().putBoolean(KEY_NUMBERS_BACKFILLED, true).apply() }
+                }
             }
         }
     }
@@ -151,6 +154,16 @@ class MotifApp : Application() {
         playback.play(tracks, startAt, context, contextRef)
     }
 
+    /** Queues [tracks] after the current one; plays them when nothing is loaded. */
+    fun playNext(tracks: List<Track>, context: PlayContext = PlayContext.LIBRARY) {
+        if (playback.state.value.current == null) play(tracks, 0, context) else playback.playNext(tracks)
+    }
+
+    /** Queues [tracks] at the end; plays them when nothing is loaded. */
+    fun addToQueue(tracks: List<Track>, context: PlayContext = PlayContext.LIBRARY) {
+        if (playback.state.value.current == null) play(tracks, 0, context) else playback.addToQueue(tracks)
+    }
+
     fun delete(track: Track) {
         playback.remove(track)
         if (djStarted) dj.remove(track)
@@ -164,6 +177,7 @@ class MotifApp : Application() {
         const val KEY_ANALYZE = "analyze_on_import"
         const val KEY_MIX = "mix_into_next"
         const val KEY_GRIDS_BACKFILLED = "beat_grids_backfilled"
+        const val KEY_NUMBERS_BACKFILLED = "track_numbers_backfilled"
         const val KEY_JAMENDO = "jamendo_client_id"
     }
 }

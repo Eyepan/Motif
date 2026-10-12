@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import app.motif.data.AlbumPosition
 import app.motif.data.ArtworkStore
 import app.motif.data.LibraryStore
 import app.motif.data.RawTags
@@ -98,6 +99,36 @@ class Importer(
                     if (r != null) store.updateAnalysis(track.id, r.bpm, r.loudnessDb, r.camelotKey, r.waveform, r.firstDownbeat)
                 }
             }
+            launch(Dispatchers.Main) { onDone() }
+        }
+    }
+
+    /**
+     * Reads track and disc numbers for tracks imported before they were kept,
+     * so albums play in order, then calls [onDone].
+     */
+    fun backfillTrackNumbers(tracks: List<Track>, onDone: () -> Unit) {
+        val todo = tracks.filter { it.trackNumber == null }
+        scope.launch(Dispatchers.IO) {
+            val found = HashMap<String, AlbumPosition>()
+            for (track in todo) {
+                val file = store.fileFor(track)
+                if (!file.exists()) continue
+                val position = runCatching {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(file.absolutePath)
+                        AlbumPosition(
+                            AlbumPosition.number(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)),
+                            AlbumPosition.number(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)),
+                        )
+                    } finally {
+                        retriever.release()
+                    }
+                }.getOrNull()
+                if (position != null && (position.track != null || position.disc != null)) found[track.id] = position
+            }
+            store.updateTrackNumbers(found)
             launch(Dispatchers.Main) { onDone() }
         }
     }
@@ -295,6 +326,8 @@ class Importer(
                 sourceRef = info?.sourceRef,
                 licenseUrl = info?.licenseUrl,
                 addedAt = System.currentTimeMillis() / 1000,
+                trackNumber = AlbumPosition.number(meta(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)),
+                discNumber = AlbumPosition.number(meta(MediaMetadataRetriever.METADATA_KEY_DISC_NUMBER)),
             ) to raw
         } finally {
             retriever.release()

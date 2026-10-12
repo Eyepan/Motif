@@ -34,6 +34,9 @@ data class Track(
      * devices (`track_key`). Filled lazily by [LibraryStore.contentHash].
      */
     val contentHash: String? = null,
+    /** Position on the album, as tagged. */
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
 ) {
     val isLossless: Boolean get() = format in setOf("flac", "wav", "alac", "aiff")
 
@@ -91,6 +94,7 @@ data class Track(
             format == other.format && sampleRate == other.sampleRate && bitDepth == other.bitDepth &&
             bpm == other.bpm && musicalKey == other.musicalKey && loudnessDb == other.loudnessDb &&
             firstDownbeat == other.firstDownbeat && contentHash == other.contentHash &&
+            trackNumber == other.trackNumber && discNumber == other.discNumber &&
             waveform.contentEquals(other.waveform)
 
     override fun hashCode(): Int = id.hashCode()

@@ -79,7 +79,7 @@ public actor LibraryStore {
     public static let waveformLength = 128
 
     /// Columns `upsert` writes, in bind order.
-    private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at, album_artist"
+    private static let columns = "id, title, artist, album, duration_ms, file_path, format, sample_rate, bit_depth, channels, source, source_ref, license_url, bpm, loudness_db, musical_key, waveform, added_at, album_artist, track_no, disc_no"
     /// Columns read into a `Track`: everything `upsert` writes, plus what other steps fill in
     /// (content hash; beat grid and analyser version from `updateAnalysis`).
     private static let readColumns = columns + ", content_hash, beat_offset_ms, analyzer_version"
@@ -168,7 +168,7 @@ public actor LibraryStore {
     /// row, which would cascade to its tags, credits and genres and null every
     /// column `Track` doesn't carry.
     public func upsert(_ t: Track) throws {
-        let placeholders = (1...19).map { "?\($0)" }.joined(separator: ", ")
+        let placeholders = (1...21).map { "?\($0)" }.joined(separator: ", ")
         let updates = Self.columns.split(separator: ", ").dropFirst().map { "\($0) = excluded.\($0)" }.joined(separator: ", ")
         try run(
             "INSERT INTO tracks (\(Self.columns)) VALUES (\(placeholders)) ON CONFLICT(id) DO UPDATE SET \(updates)",
@@ -176,7 +176,7 @@ public actor LibraryStore {
                 t.id.uuidString, t.title, t.artist, t.album, t.durationMs, t.filePath, t.format,
                 t.sampleRate, t.bitDepth, t.channels, t.source.rawValue, t.sourceRef,
                 t.licenseURL?.absoluteString, t.bpm, t.loudnessDb, t.musicalKey, t.waveform.map { Data($0) },
-                Int(t.addedAt.timeIntervalSince1970), t.albumArtist,
+                Int(t.addedAt.timeIntervalSince1970), t.albumArtist, t.trackNumber, t.discNumber,
             ]
         )
     }
@@ -261,6 +261,11 @@ public actor LibraryStore {
             bind: [analysis.bpm, analysis.loudnessDb, analysis.musicalKey, Data(analysis.waveform),
                    analysis.firstDownbeat.map { Int(($0 * 1000).rounded()) }, TrackAnalyzer.version, id.uuidString]
         )
+    }
+
+    /// Saves the album position read from the file's tags, for tracks imported before it was kept.
+    public func updateTrackNumbers(id: UUID, track: Int?, disc: Int?) throws {
+        try run("UPDATE tracks SET track_no = ?1, disc_no = ?2 WHERE id = ?3", bind: [track, disc, id.uuidString])
     }
 
     /// The track's content hash, hashing its file and saving the result the first time.
@@ -387,9 +392,11 @@ public actor LibraryStore {
             waveform: bytes(16),
             addedAt: Date(timeIntervalSince1970: TimeInterval(int(17) ?? 0)),
             albumArtist: text(18),
-            contentHash: text(19),
-            firstDownbeat: int(20).map { Double($0) / 1000 },
-            analyzerVersion: int(21)
+            contentHash: text(21),
+            firstDownbeat: int(22).map { Double($0) / 1000 },
+            analyzerVersion: int(23),
+            trackNumber: int(19),
+            discNumber: int(20)
         )
     }
 

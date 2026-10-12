@@ -1,12 +1,15 @@
 package app.motif
 
+import app.motif.data.AlbumPosition
 import app.motif.data.LibraryFilter
+import app.motif.data.artistIndexOf
 import app.motif.data.artistsOf
 import app.motif.data.Track
 import app.motif.data.albumsOf
 import app.motif.playback.Mixing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -107,5 +110,37 @@ class LibraryTest {
         )
         val artists = artistsOf(tracks, ::fakeSplit) { it.lowercase() }
         assertEquals(listOf("Garfunkel" to 2, "Simon" to 2), artists.map { it.name to it.tracks.size })
+    }
+
+    @Test fun albumTracksFollowDiscAndTrackNumbers() {
+        val albums = albumsOf(listOf(
+            song("Untagged", "Band", "LP").copy(addedAt = 5),
+            song("Two", "Band", "LP").copy(trackNumber = 2),
+            song("Disc 2 opener", "Band", "LP").copy(trackNumber = 1, discNumber = 2),
+            song("One", "Band", "LP").copy(trackNumber = 1, discNumber = 1),
+            song("Earlier untagged", "Band", "LP").copy(addedAt = 1),
+        ))
+        assertEquals(
+            listOf("One", "Two", "Disc 2 opener", "Earlier untagged", "Untagged"),
+            albums.single().tracks.map { it.title },
+        )
+    }
+
+    @Test fun trackNumberTags() {
+        assertEquals(3, AlbumPosition.number("3"))
+        assertEquals(3, AlbumPosition.number(" 03/12"))
+        assertNull(AlbumPosition.number("0"))
+        assertNull(AlbumPosition.number("A1"))
+        assertNull(AlbumPosition.number(null))
+    }
+
+    @Test fun eachTrackKnowsItsCreditedArtistsInOrder() {
+        val tracks = listOf(
+            track("a").copy(artist = "Shankar Mahadevan, Anirudh Ravichander"),
+            track("b").copy(artist = null),
+        )
+        val (artists, credits) = artistIndexOf(tracks, ::fakeSplit) { it.lowercase() }
+        assertEquals(listOf("shankar mahadevan", "anirudh ravichander"), credits["a"])
+        assertEquals(listOf(artists.last().key), credits["b"])
     }
 }

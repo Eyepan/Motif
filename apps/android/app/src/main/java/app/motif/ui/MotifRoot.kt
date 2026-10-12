@@ -21,6 +21,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.motif.MotifApp
+import app.motif.data.LibraryIndex
 import app.motif.data.PlayContext
 import app.motif.data.Track
 import app.motif.ui.theme.Motif
@@ -57,83 +59,106 @@ fun MotifRoot(app: MotifApp) {
     val showWelcome by app.account.showWelcome.collectAsStateWithLifecycle()
     val accountError by app.account.errors.collectAsStateWithLifecycle()
     var settingsPages by remember { mutableStateOf(emptyList<SettingsPage>()) }
+    // Album and artist pages open over the current tab; picking a tab closes them.
+    var pages by rememberSaveable(stateSaver = LibraryPage.StackSaver) { mutableStateOf(emptyList<LibraryPage>()) }
+    val index = remember(tracks) { LibraryIndex(tracks) }
+    val actions = remember(index) {
+        LibraryActions(
+            index,
+            open = { page -> if (pages.lastOrNull() != page) pages = pages + page; showNowPlaying = false },
+            playNext = { app.playNext(it) },
+            addToQueue = { app.addToQueue(it) },
+            addToCrate = { addToCrate = it },
+        )
+    }
 
     if (showWelcome) {
         WelcomeScreen(app)
         return
     }
 
-    Scaffold(
-        containerColor = Motif.ground,
-        // Each screen handles the status bar itself; the navigation bar handles the bottom inset.
-        contentWindowInsets = WindowInsets(0),
-        bottomBar = {
-            Column {
-                player.current?.let { MiniPlayer(player, app.playback, onOpen = { showNowPlaying = true }) }
-                NavigationBar(containerColor = Motif.surface) {
-                    Tab.entries.forEach { t ->
-                        NavigationBarItem(
-                            selected = tab == t,
-                            onClick = { tab = t },
-                            icon = { Icon(t.icon, contentDescription = null) },
-                            label = { Text(t.label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = Motif.accent,
-                                selectedTextColor = Motif.accent,
-                                indicatorColor = Motif.raised,
-                                unselectedIconColor = Motif.secondary,
-                                unselectedTextColor = Motif.secondary,
-                            ),
-                        )
+    CompositionLocalProvider(LocalLibraryActions provides actions) {
+        Scaffold(
+            containerColor = Motif.ground,
+            // Each screen handles the status bar itself; the navigation bar handles the bottom inset.
+            contentWindowInsets = WindowInsets(0),
+            bottomBar = {
+                Column {
+                    player.current?.let { MiniPlayer(player, app.playback, onOpen = { showNowPlaying = true }) }
+                    NavigationBar(containerColor = Motif.surface) {
+                        Tab.entries.forEach { t ->
+                            NavigationBarItem(
+                                selected = tab == t,
+                                onClick = { tab = t; pages = emptyList() },
+                                icon = { Icon(t.icon, contentDescription = null) },
+                                label = { Text(t.label) },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Motif.accent,
+                                    selectedTextColor = Motif.accent,
+                                    indicatorColor = Motif.raised,
+                                    unselectedIconColor = Motif.secondary,
+                                    unselectedTextColor = Motif.secondary,
+                                ),
+                            )
+                        }
                     }
                 }
+            },
+        ) { padding ->
+            val modifier = Modifier.fillMaxSize().padding(padding)
+            if (pages.isNotEmpty()) {
+                LibraryPages(
+                    pages, player.current,
+                    onPlay = { list, i, context -> app.play(list, i, context) },
+                    onBack = { pages = pages.dropLast(1) },
+                    modifier = modifier,
+                )
+            } else when (tab) {
+                Tab.Library -> LibraryScreen(
+                    tracks = tracks,
+                    current = player.current,
+                    onPlay = { list, index, context -> app.play(list, index, context) },
+                    onDelete = app::delete,
+                    onImport = { showImport = true },
+                    onOpenMix = { tab = Tab.Mix },
+                    crates = crates,
+                    onAddToCrate = { addToCrate = listOf(it) },
+                    onOpenCrate = { openCrate = it.id; tab = Tab.Crates },
+                    index = index,
+                    onOpen = actions.open,
+                    onOpenSettings = { settingsPages = listOf(SettingsPage.Settings) },
+                    modifier = modifier,
+                )
+                Tab.Crates -> CratesScreen(app, tracks, player.current, openCrate, onOpen = { openCrate = it }, modifier = modifier)
+                Tab.Mix -> DjScreen(app.dj, tracks, modifier)
+                Tab.Search -> SearchScreen(
+                    tracks = tracks,
+                    current = player.current,
+                    onPlay = { list, index -> app.play(list, index, PlayContext.SEARCH) },
+                    modifier = modifier,
+                )
+                Tab.Discover -> DiscoverScreen(app, modifier)
             }
-        },
-    ) { padding ->
-        val modifier = Modifier.fillMaxSize().padding(padding)
-        when (tab) {
-            Tab.Library -> LibraryScreen(
-                tracks = tracks,
-                current = player.current,
-                onPlay = { list, index, context -> app.play(list, index, context) },
-                onDelete = app::delete,
-                onImport = { showImport = true },
-                onOpenMix = { tab = Tab.Mix },
-                crates = crates,
-                onAddToCrate = { addToCrate = listOf(it) },
-                onOpenCrate = { openCrate = it.id; tab = Tab.Crates },
-                onOpenSettings = { settingsPages = listOf(SettingsPage.Settings) },
-                modifier = modifier,
-            )
-            Tab.Crates -> CratesScreen(app, tracks, player.current, openCrate, onOpen = { openCrate = it }, modifier = modifier)
-            Tab.Mix -> DjScreen(app.dj, tracks, modifier)
-            Tab.Search -> SearchScreen(
-                tracks = tracks,
-                current = player.current,
-                onPlay = { list, index -> app.play(list, index, PlayContext.SEARCH) },
-                modifier = modifier,
-            )
-            Tab.Discover -> DiscoverScreen(app, modifier)
         }
-    }
 
-    if (showNowPlaying && player.current != null) {
-        NowPlayingSheet(player, app.playback, onDismiss = { showNowPlaying = false })
-    }
-    addToCrate?.let { picked -> CratePicker(app, picked, onDismiss = { addToCrate = null }) }
-    if (showImport) {
-        ImportSheet(app, onDismiss = { showImport = false }, onDiscover = { showImport = false; tab = Tab.Discover })
-    }
-    // Settings, account, history and server details draw over the tabs.
-    if (settingsPages.isNotEmpty()) {
-        Box(Modifier.fillMaxSize()) { SettingsScreens(app, settingsPages, onNavigate = { settingsPages = it }) }
-    }
-    accountError?.let { message ->
-        AlertDialog(
-            onDismissRequest = app.account::clearError,
-            confirmButton = { TextButton(onClick = app.account::clearError) { Text("OK", color = Motif.accent) } },
-            text = { Text(message) },
-            containerColor = Motif.raised,
-        )
+        if (showNowPlaying && player.current != null) {
+            NowPlayingSheet(player, app.playback, onDismiss = { showNowPlaying = false })
+        }
+        addToCrate?.let { picked -> CratePicker(app, picked, onDismiss = { addToCrate = null }) }
+        if (showImport) {
+            ImportSheet(app, onDismiss = { showImport = false }, onDiscover = { showImport = false; tab = Tab.Discover })
+        }
+        // Settings, account, history and server details draw over the tabs.
+        if (settingsPages.isNotEmpty()) {
+            Box(Modifier.fillMaxSize()) { SettingsScreens(app, settingsPages, onNavigate = { settingsPages = it }) }
+        }
+        accountError?.let { message ->
+            AlertDialog(
+                onDismissRequest = app.account::clearError,
+                confirmButton = { TextButton(onClick = app.account::clearError) { Text("OK", color = Motif.accent) } },
+                text = { Text(message) },
+                containerColor = Motif.raised,
+            )
+        }
     }
 }

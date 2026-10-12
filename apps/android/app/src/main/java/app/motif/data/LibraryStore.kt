@@ -155,6 +155,26 @@ class LibraryStore(private val context: Context) {
             refresh()
         }
 
+    /** Saves album positions read from the files' tags, for tracks imported before they were kept. */
+    suspend fun updateTrackNumbers(positions: Map<String, AlbumPosition>) = withContext(Dispatchers.IO) {
+        if (positions.isEmpty()) return@withContext
+        val db = helper.writableDatabase
+        db.beginTransaction()
+        try {
+            for ((id, p) in positions) {
+                val values = ContentValues().apply {
+                    put("track_no", p.track)
+                    put("disc_no", p.disc)
+                }
+                db.update("tracks", values, "id = ?", arrayOf(id))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        refresh()
+    }
+
     /** Points a track at a new audio file (a better copy of the same recording) and records its format. */
     suspend fun replaceFile(track: Track) = withContext(Dispatchers.IO) {
         val values = ContentValues().apply {
@@ -233,6 +253,8 @@ private fun Track.toValues() = ContentValues().apply {
     put("beat_offset_ms", firstDownbeat?.let { Math.round(it * 1000) })
     put("added_at", addedAt)
     put("album_artist", albumArtist)
+    put("track_no", trackNumber)
+    put("disc_no", discNumber)
 }
 
 private fun Cursor.str(name: String): String? = getColumnIndexOrThrow(name).let { if (isNull(it)) null else getString(it) }
@@ -261,6 +283,8 @@ private fun Cursor.toTrack() = Track(
     addedAt = getLong(getColumnIndexOrThrow("added_at")),
     albumArtist = str("album_artist"),
     contentHash = str("content_hash"),
+    trackNumber = int("track_no"),
+    discNumber = int("disc_no"),
 )
 
 /** Lowercase hex SHA-256 of a file, read in 1 MiB chunks. */

@@ -3,8 +3,18 @@ package app.motif.data
 import java.text.Normalizer
 import java.util.Locale
 
-/** An album in the library, built from its tracks' album tags. */
-class Album(val key: String, val title: String, val artist: String?, val tracks: List<Track>)
+/** An album in the library, built from its tracks' album tags. [tracks] are in album order. */
+class Album(val key: String, val title: String, val artist: String?, val tracks: List<Track>) {
+    val durationMs: Long get() = tracks.sumOf { it.durationMs }
+
+    /** "12 songs · 48 min" */
+    val summary: String
+        get() = "${tracks.size} ${if (tracks.size == 1) "song" else "songs"} · ${Math.round(durationMs / 60_000.0)} min"
+
+    /** "FLAC 24/96" when every track shares one quality, else "Mixed formats". */
+    val qualitySummary: String
+        get() = tracks.map { it.shortQualityLabel }.distinct().singleOrNull() ?: "Mixed formats"
+}
 
 /**
  * Albums in library order (newest first). Tracks group by album title alone,
@@ -19,7 +29,8 @@ class Album(val key: String, val title: String, val artist: String?, val tracks:
 fun albumsOf(tracks: List<Track>): List<Album> =
     tracks.filter { !it.album.isNullOrBlank() }
         .groupBy { albumKey(it.album!!) }
-        .map { (key, list) ->
+        .map { (key, group) ->
+            val list = albumOrder(group)
             val artists = list.mapNotNull { it.artist?.trim()?.takeIf(String::isNotEmpty) }.distinctBy(::albumKey)
             val artist = when {
                 artists.isEmpty() -> null
@@ -28,6 +39,21 @@ fun albumsOf(tracks: List<Track>): List<Album> =
             }
             Album(key, list[0].album!!.trim(), artist, list)
         }
+
+/** Disc then track number; tracks without a number after, in import order, then by title. */
+fun albumOrder(tracks: List<Track>): List<Track> =
+    tracks.sortedWith(
+        compareBy<Track>({ it.trackNumber == null }, { it.discNumber ?: 1 }, { it.trackNumber }, { it.addedAt }, { it.title }),
+    )
+
+/** Where a track sits on its album, as tagged. */
+data class AlbumPosition(val track: Int?, val disc: Int?) {
+    companion object {
+        /** "3", "3/12" or "03"; null when missing or zero. */
+        fun number(tag: String?): Int? =
+            tag?.trim()?.takeWhile(Char::isDigit)?.toIntOrNull()?.takeIf { it > 0 }
+    }
+}
 
 /**
  * Comparison key for tag text: Unicode-normalized, trimmed, single-spaced and

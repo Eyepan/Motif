@@ -16,6 +16,14 @@ struct MacLibraryTable: View {
     var newestFirst = false
     /// The crate being shown, which adds Remove from Crate.
     var crate: Crate?
+    /// What playing from this table counts as in listening history, when not the library or a crate.
+    var context: PlayContext?
+    /// On an album page: number rows by track and leave out Go to Album.
+    var albumPage = false
+    /// On an artist page: leave out Go to Artist for them.
+    var artistID: String?
+    /// Drawn above the table, e.g. an album or artist header.
+    var header: AnyView?
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var sortOrder: [KeyPathComparator<Row>] = []
@@ -31,65 +39,70 @@ struct MacLibraryTable: View {
             list = model.tracks(matching: query)
         }
         if newestFirst { list.sort { $0.addedAt > $1.addedAt } }
-        let numbered = list.enumerated().map { Row(number: $0.offset + 1, track: $0.element) }
+        let numbered = list.enumerated().map {
+            Row(number: albumPage ? $0.element.trackNumber ?? $0.offset + 1 : $0.offset + 1, track: $0.element)
+        }
         return sortOrder.isEmpty ? numbered : numbered.sorted(using: sortOrder)
     }
 
     var body: some View {
         let rows = self.rows
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("#", value: \.number) { row in
-                Text("\(row.number)").monospacedDigit().foregroundStyle(Theme.secondary)
+        VStack(spacing: 0) {
+            if let header { header }
+            Table(rows, selection: $selection, sortOrder: $sortOrder) {
+                TableColumn("#", value: \.number) { row in
+                    Text("\(row.number)").monospacedDigit().foregroundStyle(Theme.secondary)
+                }
+                .width(min: 28, ideal: 36, max: 48)
+                TableColumn("Title", value: \.track.sortTitle) { row in
+                    Text(row.track.title)
+                        .fontWeight(isCurrent(row) ? .semibold : .regular)
+                        .foregroundStyle(isCurrent(row) ? Theme.accent : Theme.text)
+                }
+                .width(min: 160, ideal: 260)
+                TableColumn("Artist", value: \.track.sortArtist) { row in
+                    if row.track.artist != nil { ArtistLink(track: row.track, color: Color(hex: 0xB5BAC3)) }
+                }
+                TableColumn("Album", value: \.track.sortAlbum) { row in
+                    AlbumLink(track: row.track, color: Color(hex: 0xB5BAC3))
+                }
+                TableColumn("Time", value: \.track.durationMs) { row in
+                    Text(formatTime(row.track.duration)).monospacedDigit().foregroundStyle(Color(hex: 0xB5BAC3))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .width(min: 44, ideal: 54, max: 70)
+                TableColumn("BPM", value: \.track.sortBPM) { row in
+                    MixValue(text: row.track.bpm.map { "\(Int($0.rounded()))" } ?? "—",
+                             color: Theme.bpmColor(row.track.bpm), match: matches(row, MixMatch.tempos))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                .width(min: 40, ideal: 50, max: 64)
+                TableColumn("Key", value: \.track.sortKey) { row in
+                    MixValue(text: row.track.musicalKey ?? "—", color: Theme.keyColor(row.track.musicalKey),
+                             match: matches(row, MixMatch.keys))
+                }
+                .width(min: 36, ideal: 44, max: 60)
+                TableColumn("Format", value: \.track.format) { row in
+                    Text(row.track.shortQualityLabel).font(Theme.mono(11)).foregroundStyle(Theme.badge)
+                }
+                .width(min: 70, ideal: 90, max: 120)
             }
-            .width(min: 28, ideal: 36, max: 48)
-            TableColumn("Title", value: \.track.sortTitle) { row in
-                Text(row.track.title)
-                    .fontWeight(isCurrent(row) ? .semibold : .regular)
-                    .foregroundStyle(isCurrent(row) ? Theme.accent : Theme.text)
-            }
-            .width(min: 160, ideal: 260)
-            TableColumn("Artist", value: \.track.sortArtist) { row in
-                Text(row.track.artist ?? "").foregroundStyle(Color(hex: 0xB5BAC3))
-            }
-            TableColumn("Album", value: \.track.sortAlbum) { row in
-                Text(row.track.album ?? "").foregroundStyle(Color(hex: 0xB5BAC3))
-            }
-            TableColumn("Time", value: \.track.durationMs) { row in
-                Text(formatTime(row.track.duration)).monospacedDigit().foregroundStyle(Color(hex: 0xB5BAC3))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .width(min: 44, ideal: 54, max: 70)
-            TableColumn("BPM", value: \.track.sortBPM) { row in
-                MixValue(text: row.track.bpm.map { "\(Int($0.rounded()))" } ?? "—",
-                         color: Theme.bpmColor(row.track.bpm), match: matches(row, MixMatch.tempos))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .width(min: 40, ideal: 50, max: 64)
-            TableColumn("Key", value: \.track.sortKey) { row in
-                MixValue(text: row.track.musicalKey ?? "—", color: Theme.keyColor(row.track.musicalKey),
-                         match: matches(row, MixMatch.keys))
-            }
-            .width(min: 36, ideal: 44, max: 60)
-            TableColumn("Format", value: \.track.format) { row in
-                Text(row.track.shortQualityLabel).font(Theme.mono(11)).foregroundStyle(Theme.badge)
-            }
-            .width(min: 70, ideal: 90, max: 120)
-        }
-        .contextMenu(forSelectionType: Row.ID.self) { ids in
-            let picked = rows.filter { ids.contains($0.id) }.map(\.track)
-            Button("Play") { play(ids, in: rows) }
-            AddToCrateMenu(tracks: picked)
-            if let crate {
-                Button("Remove from Crate") { Task { await model.remove(picked, from: crate) } }
-            }
-            Divider()
-            Button("Delete from Library", role: .destructive) {
-                let doomed = rows.filter { ids.contains($0.id) }.map(\.track)
-                Task { for t in doomed { await model.delete(t) } }
-            }
-        } primaryAction: { ids in
-            play(ids, in: rows)
-        }
+            .contextMenu(forSelectionType: Row.ID.self) { ids in
+                let picked = rows.filter { ids.contains($0.id) }.map(\.track)
+                Button("Play") { play(ids, in: rows) }
+                TrackMenuItems(tracks: picked, hideAlbum: albumPage, hideArtistID: artistID)
+                AddToCrateMenu(tracks: picked)
+                if let crate {
+                    Button("Remove from Crate") { Task { await model.remove(picked, from: crate) } }
+                }
+                Divider()
+                Button("Delete from Library", role: .destructive) {
+                    let doomed = rows.filter { ids.contains($0.id) }.map(\.track)
+                    Task { for t in doomed { await model.delete(t) } }
+                }
+            } primaryAction: { ids in
+                play(ids, in: rows)
+                  }
         .overlay {
             if model.tracks.isEmpty {
                 ContentUnavailableView {
@@ -153,7 +166,8 @@ struct MacLibraryTable: View {
     /// Plays the visible list from the first selected row, so the queue follows the table.
     private func play(_ ids: Set<Row.ID>, in rows: [Row]) {
         guard let start = rows.firstIndex(where: { ids.contains($0.id) }) else { return }
-        model.player.play(rows.map(\.track), startAt: start, context: crate == nil ? .library : .crate, contextRef: crate?.id)
+        model.player.play(rows.map(\.track), startAt: start, context: context ?? (crate == nil ? .library : .crate),
+                          contextRef: crate?.id)
     }
 }
 #endif

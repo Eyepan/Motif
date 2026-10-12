@@ -99,6 +99,21 @@ public final class PlaybackEngine {
         load(index: index, autoplay: true, context: (context, context == .queue ? nil : contextRef))
     }
 
+    /// Queues `tracks` right after the current one, or plays them when nothing is loaded.
+    /// During a blend they go after the incoming track, so the blend carries on.
+    public func playNext(_ tracks: [Track], context: PlayContext = .library) {
+        guard let i = currentIndex else { play(tracks, context: context); return }
+        queue.insert(contentsOf: tracks, at: min(queue.count, i + (isMixing ? 2 : 1)))
+        nowPlaying.update()
+    }
+
+    /// Adds `tracks` to the end of the queue, or plays them when nothing is loaded.
+    public func addToQueue(_ tracks: [Track], context: PlayContext = .library) {
+        guard currentIndex != nil else { play(tracks, context: context); return }
+        queue.append(contentsOf: tracks)
+        nowPlaying.update()
+    }
+
     public func togglePlayPause() {
         if state == .playing { pause() } else { resume() }
     }

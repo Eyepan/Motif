@@ -38,7 +38,7 @@ struct NowPlayingView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(track.title).font(.system(size: 22, weight: .bold))
-                    Text(track.subtitle).font(.system(size: 17)).foregroundStyle(Color(hex: 0xB5BAC3))
+                    CreditLinks(track: track, color: Color(hex: 0xB5BAC3)).font(.system(size: 17))
                 }
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,7 +164,8 @@ struct QueueSheet: View {
         let player = model.player
         NavigationStack {
             List {
-                ForEach(Array(player.queue.enumerated()), id: \.element.id) { index, track in
+                // By position: a song queued twice appears twice.
+                ForEach(Array(player.queue.enumerated()), id: \.offset) { index, track in
                     Button { player.play(player.queue, startAt: index, context: .queue) } label: {
                         TrackRow(track: track, isCurrent: index == player.currentIndex)
                     }
