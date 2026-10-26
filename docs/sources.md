@@ -11,7 +11,13 @@ Motif downloads only audio the user is allowed to keep, and prefers lossless for
 | Audius | Original upload (WAV, FLAC or MP3) when the artist allows downloads | Implemented (Apple, Android) | Artists upload their own music and choose per track whether fans may download it. Public API (`api.audius.co/v1`), no key. Tracks gated behind a purchase or follow are skipped. |
 | Free Music Archive | MP3 mostly | Not possible | No public API since the 2019 move to Tribe of Noise, so Motif can't search or download it without scraping the site. |
 | YouTube Music | No | Not supported | No lossless audio, and downloading from it violates its terms of service. |
-| MassTamilan and similar film-music sites | — | Not supported | They redistribute label releases (Think Music, Sony, Saregama and others) without a license from the labels. |
+| MassTamilan (`masstamilan.dev`) | No; MP3 (320/128 kbps where offered) | Experimental native integration (Apple, Android); phone testing pending | Public HTML search, album browsing, fresh audio resolution, preview and existing download/import pipelines. Native Mac search/download/import verified; availability can vary with website protection. No music license is inferred. See [provider notes](masstamilan.md). |
+
+## MassTamilan
+
+The project-level restriction on adding MassTamilan has been removed. This does not grant third-party music rights, establish the website's distribution rights, or make every advertised track eligible for download. Users must have permission to download and retain the audio they import. Motif must not assign a Creative Commons or other license to a track unless that license is actually supplied and verified.
+
+The integration is specifically for `masstamilan.dev`; other sites using the name are not substitutes. No API key is needed. See the [provider notes](masstamilan.md) for its HTML-based operation, cache and URL-expiry behavior, website access/permission limitations, validation, and phone-test instructions. Successful offline tests and Mac requests do not establish physical Android/iPhone playback support.
 
 ## Read from Downloads
 
@@ -27,7 +33,7 @@ Motif imports the music that lands in a folder, whichever site or app put it the
 
 ## Discover
 
-Discover searches every catalog at once (or one, picked at the top); a catalog that can't be reached is named without hiding the others' results. A search that finds nothing says so, and links to Qobuz and Bandcamp searches for the same words, since most label releases are only sold there. Discover searches a catalog, previews a result by streaming it, and downloads it with one tap straight into the library. On Android, downloaded files go through the same import as local files (bit-perfect copy, tags, on-device analysis); the catalog's title, artist and album fill any tag the file lacks, and the catalog's cover becomes the track's art. Downloads run in the app process two at a time and show in Add Music as well as on the result.
+Discover searches every catalog at once (or one, picked at the top); a catalog that can't be reached is named without hiding the others' results. A search that finds nothing says so, and links to Qobuz and Bandcamp searches for the same words, for purchased downloads. Discover searches a catalog, previews a result by streaming it, and downloads it with one tap straight into the library. On Android, downloaded files go through the same import as local files (bit-perfect copy, tags, on-device analysis); the catalog's title, artist and album fill any tag the file lacks, and the catalog's cover becomes the track's art. Downloads run in the app process two at a time and show in Add Music as well as on the result.
 
 ## Buying inside Motif
 

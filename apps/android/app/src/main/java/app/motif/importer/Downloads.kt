@@ -72,13 +72,15 @@ class Downloads(cacheDir: File, private val importer: Importer, private val scop
         set(key, State.Downloading(0, 1, 0f))
         val release = source.release(result)
         val files = release.files
+        if (files.isEmpty()) throw app.motif.sources.SourceException("This result has no downloadable audio.")
         val cover = release.coverUrl?.let { runCatching { Http.bytes(it) }.getOrNull() }
         // The next file downloads while the last one is imported and analysed.
         coroutineScope {
             files.forEachIndexed { index, file ->
                 val tmp = File(dir, "${UUID.randomUUID()}.${file.format}")
                 try {
-                    Http.download(file.url, tmp) { done, total ->
+                    val allowedHosts = if (source.id == "masstamilan") setOf("www.masstamilan.dev", "masstamilan.download") else null
+                    Http.download(file.url, tmp, allowedHosts) { done, total ->
                         val part = if (total > 0) done.toFloat() / total else 0f
                         set(key, State.Downloading(index, files.size, (index + part.coerceIn(0f, 1f)) / files.size))
                     }

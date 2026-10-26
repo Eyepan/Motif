@@ -95,21 +95,32 @@ public struct ImportService: Sendable {
     @discardableResult
     public func importDownload(_ download: SourceDownload, from source: Track.Source, result: SourceResult,
                                analyze: Bool = true, cover: Data? = nil) async throws -> Track {
-        let (tempURL, response) = try await session.download(from: download.url)
+        let (tempURL, response) = try await session.download(from: download.url,
+            delegate: source == .masstamilan ? MassTamilanRedirects() : nil)
         defer { try? FileManager.default.removeItem(at: tempURL) }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw SourceError.badResponse(http.statusCode)
+        }
+        if source == .masstamilan, response.mimeType != "audio/mpeg" {
+            throw MassTamilanError.unavailable
         }
         // URLSession's temp file has no extension, and AVAudioFile sniffs by extension.
         let named = tempURL.deletingLastPathComponent().appending(path: "\(UUID().uuidString).\(download.format)")
         try FileManager.default.moveItem(at: tempURL, to: named)
         defer { try? FileManager.default.removeItem(at: named) }
+        var resolvedCover = cover
+        if resolvedCover == nil, let url = download.coverURL,
+           let (data, response) = try? await session.data(from: url),
+           let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+           data.count <= ArtworkStore.maxBytes {
+            resolvedCover = data
+        }
         var track = try await ingest(copyFrom: named, source: source, sourceRef: download.sourceRef,
                                      licenseURL: result.licenseURL, fallbackTitle: download.title ?? result.title,
-                                     cover: cover)
+                                     cover: resolvedCover)
         if track.artist == nil || track.album == nil {
-            track.artist = track.artist ?? result.artist
-            track.album = track.album ?? result.album
+            track.artist = track.artist ?? download.artist ?? result.artist
+            track.album = track.album ?? download.album ?? result.album
             try await store.upsert(track)
         }
         if analyze { return await self.analyze(track) }

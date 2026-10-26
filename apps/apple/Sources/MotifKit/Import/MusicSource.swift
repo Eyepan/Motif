@@ -1,12 +1,20 @@
 import Foundation
 
-/// A catalog Motif may legally download from. See docs/sources.md.
+/// A music catalog. Availability alone does not establish download rights; see docs/sources.md.
 public protocol MusicSource: Sendable {
     var id: Track.Source { get }
     var displayName: String { get }
     func search(_ query: String) async throws -> [SourceResult]
     /// Resolves a result to the files to download, best quality first.
     func downloads(for result: SourceResult) async throws -> [SourceDownload]
+    /// Individual tracks for a browsable album. Other sources retain their existing behavior.
+    func tracks(in result: SourceResult) async throws -> [SourceResult]
+    func previewURL(for result: SourceResult) async throws -> URL?
+}
+
+public extension MusicSource {
+    func tracks(in result: SourceResult) async throws -> [SourceResult] { [result] }
+    func previewURL(for result: SourceResult) async throws -> URL? { nil }
 }
 
 public struct SourceResult: Identifiable, Hashable, Sendable {
@@ -19,11 +27,14 @@ public struct SourceResult: Identifiable, Hashable, Sendable {
     public let coverURL: URL?
     /// What the download will be, when the catalog says: "flac", "wav", "mp3".
     public let format: String?
+    public let isAlbum: Bool
+    public let durationSeconds: Int?
 
     public init(id: String, title: String, artist: String?, album: String?, licenseURL: URL?, coverURL: URL? = nil,
-                format: String? = nil) {
+                format: String? = nil, isAlbum: Bool = false, durationSeconds: Int? = nil) {
         self.id = id; self.title = title; self.artist = artist; self.album = album; self.licenseURL = licenseURL
         self.coverURL = coverURL; self.format = format
+        self.isAlbum = isAlbum; self.durationSeconds = durationSeconds
     }
 }
 
@@ -35,9 +46,14 @@ public struct SourceDownload: Hashable, Sendable {
     public let format: String
     /// Catalog id for this specific file, stored as Track.sourceRef.
     public let sourceRef: String
+    public let artist: String?
+    public let album: String?
+    public let coverURL: URL?
 
-    public init(url: URL, fileName: String, title: String?, format: String, sourceRef: String) {
+    public init(url: URL, fileName: String, title: String?, format: String, sourceRef: String,
+                artist: String? = nil, album: String? = nil, coverURL: URL? = nil) {
         self.url = url; self.fileName = fileName; self.title = title; self.format = format; self.sourceRef = sourceRef
+        self.artist = artist; self.album = album; self.coverURL = coverURL
     }
 }
 

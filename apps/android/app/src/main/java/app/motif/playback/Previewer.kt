@@ -22,8 +22,11 @@ class Previewer(private val context: Context) {
     /** Key of the result being previewed, or null. */
     private val _playing = MutableStateFlow<String?>(null)
     val playing: StateFlow<String?> = _playing.asStateFlow()
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
 
     fun play(key: String, url: String) {
+        _error.value = null
         val p = player ?: ExoPlayer.Builder(context)
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
@@ -44,6 +47,7 @@ class Previewer(private val context: Context) {
 
                     override fun onPlayerError(error: PlaybackException) {
                         _playing.value = null
+                        _error.value = "Preview failed (${error.errorCodeName}). Try resolving the track again."
                     }
                 })
                 player = created
@@ -63,5 +67,6 @@ class Previewer(private val context: Context) {
         player?.release()
         player = null
         _playing.value = null
+        _error.value = null
     }
 }

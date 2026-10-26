@@ -1,5 +1,6 @@
 import MotifKit
 import SwiftUI
+import AVFoundation
 
 /// Search open catalogs and download into the library. "All" searches every catalog
 /// at once; one catalog failing doesn't hide the others' results. A search that finds
@@ -15,6 +16,10 @@ struct DiscoverView: View {
     @State private var searching = false
     @State private var downloading: Set<String> = []
     @State private var done: Set<String> = []
+    @State private var albumHit: Hit?
+    @State private var previewPlayer: AVPlayer?
+    @State private var previewObservation: NSKeyValueObservation?
+    @State private var previewing: String?
 
     struct Hit: Identifiable {
         let source: any MusicSource
@@ -37,6 +42,13 @@ struct DiscoverView: View {
                 ForEach(model.sources.indices, id: \.self) { Text(model.sources[$0].displayName).tag($0 + 1) }
             }
             .pickerStyle(.segmented)
+            if targets.contains(where: { $0.id == .masstamilan }) {
+                Text("MassTamilan: public availability does not grant download rights. Only download music you have permission to keep.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if targets.count == 1, targets.first?.id == .masstamilan {
+                Button("Browse latest albums") { Task { await search(latest: true) } }
+            }
             if !hits.isEmpty, !failures.isEmpty {
                 failureNote
             }
@@ -50,7 +62,7 @@ struct DiscoverView: View {
             } else if let searchedFor, hits.isEmpty {
                 noResults(searchedFor)
             } else if hits.isEmpty {
-                ContentUnavailableView("Find music you're free to keep",
+                ContentUnavailableView("Find music",
                                        systemImage: "magnifyingglass",
                                        description: Text("Search \(catalogNames). Downloads go straight into your library with tags, art, BPM and key."))
             }
@@ -64,6 +76,13 @@ struct DiscoverView: View {
             if !query.trimmingCharacters(in: .whitespaces).isEmpty { Task { await search() } }
         }
         .navigationTitle("Discover")
+        .sheet(item: $albumHit) { hit in
+            NavigationStack {
+                MassTamilanAlbumView(hit: hit)
+                    .toolbar { Button("Done") { albumHit = nil } }
+            }
+        }
+        .onDisappear { previewPlayer?.pause(); previewing = nil; previewObservation = nil }
     }
 
     private func row(_ hit: Hit) -> some View {
@@ -87,6 +106,14 @@ struct DiscoverView: View {
                 }
             }
             Spacer()
+            if result.isAlbum {
+                Button("Tracks") { previewPlayer?.pause(); previewing = nil; albumHit = hit }.buttonStyle(.borderless)
+            }
+            if hit.source.id == .masstamilan, !result.isAlbum {
+                Button { Task { await preview(hit) } } label: {
+                    Image(systemName: previewing == hit.id ? "stop.circle" : "play.circle")
+                }.buttonStyle(.borderless)
+            }
             downloadButton(for: hit)
         }
     }
@@ -107,7 +134,7 @@ struct DiscoverView: View {
                 if !failures.isEmpty {
                     failureNote
                 }
-                Text("Nothing on \(catalogNames) matches. These catalogs only carry music the artists or archives chose to share freely, so most label releases aren't here. Check the spelling, or look for it in a store, then add the files with Add Music.")
+                Text("Nothing on \(catalogNames) matches. Check the spelling, or look for it in a store, then add the files with Add Music.")
             }
         } actions: {
             ForEach(Self.storeSearches(query)) { store in
@@ -145,15 +172,36 @@ struct DiscoverView: View {
         }
     }
 
-    private func search() async {
+    private func search(latest: Bool = false) async {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
+        guard latest || !q.isEmpty else { return }
+        previewPlayer?.pause(); previewing = nil
         searching = true
         defer { searching = false }
-        let outcome = await Self.searchAll(targets, q)
+        let outcome = await Self.searchAll(targets, latest ? "" : q)
         hits = outcome.hits
         failures = outcome.failures
         searchedFor = q
+    }
+
+    private func preview(_ hit: Hit) async {
+        if previewing == hit.id { previewPlayer?.pause(); previewing = nil; return }
+        previewPlayer?.pause()
+        do {
+            guard let url = try await hit.source.previewURL(for: hit.result) else { return }
+            model.player.pause()
+            model.dj.stopForPlayback()
+            let item = AVPlayerItem(url: url)
+            let model = model
+            previewObservation = item.observe(\.status, options: [.new]) { item, _ in
+                guard item.status == .failed else { return }
+                let message = item.error?.localizedDescription ?? "The preview could not be played. Try resolving the track again."
+                Task { @MainActor in model.errorMessage = message }
+            }
+            let player = AVPlayer(playerItem: item)
+            previewPlayer = player; previewing = hit.id
+            player.play()
+        } catch { model.errorMessage = error.localizedDescription }
     }
 
     /// Searches side by side, interleaving so each catalog's best matches come first.
@@ -203,5 +251,92 @@ struct DiscoverView: View {
     enum DiscoverError: LocalizedError {
         case nothingToDownload
         var errorDescription: String? { "The artist only allows streaming this one." }
+    }
+}
+
+/// Album pages reuse the provider's track results and the same preview/import flow.
+private struct MassTamilanAlbumView: View {
+    @Environment(AppModel.self) private var model
+    let hit: DiscoverView.Hit
+    @State private var tracks: [SourceResult] = []
+    @State private var error: String?
+    @State private var loading = true
+    @State private var player: AVPlayer?
+    @State private var observation: NSKeyValueObservation?
+    @State private var previewing: String?
+
+    var body: some View {
+        List {
+            if loading { ProgressView() }
+            if let error { Text(error).foregroundStyle(.red) }
+            if !loading, error == nil, tracks.isEmpty { Text("This album has no available tracks.") }
+            ForEach(tracks) { track in
+                MassTamilanTrackRow(source: hit.source, result: track, previewing: previewing == track.id) {
+                    if previewing == track.id { player?.pause(); previewing = nil; return }
+                    player?.pause()
+                    do {
+                        guard let url = try await hit.source.previewURL(for: track) else { return }
+                        model.player.pause(); model.dj.stopForPlayback()
+                        let item = AVPlayerItem(url: url)
+                        let model = model
+                        observation = item.observe(\.status, options: [.new]) { item, _ in
+                            guard item.status == .failed else { return }
+                            let message = item.error?.localizedDescription ?? "The preview could not be played. Try resolving the track again."
+                            Task { @MainActor in model.errorMessage = message }
+                        }
+                        player = AVPlayer(playerItem: item); previewing = track.id; player?.play()
+                    } catch { self.error = error.localizedDescription }
+                }
+            }
+        }
+        .navigationTitle(hit.result.title)
+        .onDisappear { player?.pause(); observation = nil }
+        .task {
+            do { tracks = try await hit.source.tracks(in: hit.result) }
+            catch { self.error = error.localizedDescription }
+            loading = false
+        }
+    }
+}
+
+private struct MassTamilanTrackRow: View {
+    @Environment(AppModel.self) private var model
+    let source: any MusicSource
+    let result: SourceResult
+    let previewing: Bool
+    let onPreview: () async -> Void
+    @State private var busy = false
+    @State private var done = false
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(result.title)
+                if let artist = result.artist { Text(artist).font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            Button { Task { await onPreview() } } label: {
+                Image(systemName: previewing ? "stop.circle" : "play.circle")
+            }.buttonStyle(.borderless)
+            if busy { ProgressView() }
+            else if done { Image(systemName: "checkmark.circle") }
+            else {
+                Button {
+                    Task {
+                        busy = true
+                        defer { busy = false }
+                        do {
+                            let files = try await source.downloads(for: result)
+                            for file in files {
+                                try await model.importer.importDownload(file, from: source.id, result: result,
+                                                                        analyze: model.analyzeOnImport)
+                            }
+                            await model.refresh(); done = true
+                        } catch { model.errorMessage = error.localizedDescription }
+                    }
+                } label: { Image(systemName: "arrow.down.circle") }
+                .buttonStyle(.borderless)
+            }
+        }
     }
 }

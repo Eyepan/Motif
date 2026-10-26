@@ -89,7 +89,7 @@ final class AppModel {
         folderImporter = FolderImporter(importer: importer, store: store,
                                         stateFile: store.mediaDirectory.deletingLastPathComponent().appending(path: "folder-import.json"))
         let jamendo = JamendoSource()
-        sources = (jamendo.isConfigured ? [jamendo] : []) + [InternetArchiveSource(), AudiusSource()]
+        sources = (jamendo.isConfigured ? [jamendo] : []) + [InternetArchiveSource(), AudiusSource(), MassTamilanSource()]
         analyzeOnImport = UserDefaults.standard.object(forKey: "analyzeOnImport") as? Bool ?? true
         player.mixIntoNext = UserDefaults.standard.bool(forKey: "mixIntoNext")
         let player = player, dj = dj, account = account
