@@ -70,7 +70,14 @@ kotlin {
     compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 }
 
+// Changing the opt-in flags must rerun the HTTP probes rather than reuse an offline test result.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    inputs.property("massTamilanLive", providers.environmentVariable("MOTIF_MASSTAMILAN_LIVE").orElse("0"))
+    inputs.property("massTamilanLiveMedia", providers.environmentVariable("MOTIF_MASSTAMILAN_LIVE_MEDIA").orElse("0"))
+}
+
 dependencies {
+    implementation("org.jsoup:jsoup:1.18.3")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
