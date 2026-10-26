@@ -11,7 +11,13 @@ Motif downloads only audio the user is allowed to keep, and prefers lossless for
 | Audius | Original upload (WAV, FLAC or MP3) when the artist allows downloads | Implemented (Apple, Android) | Artists upload their own music and choose per track whether fans may download it. Public API (`api.audius.co/v1`), no key. Tracks gated behind a purchase or follow are skipped. |
 | Free Music Archive | MP3 mostly | Not possible | No public API since the 2019 move to Tribe of Noise, so Motif can't search or download it without scraping the site. |
 | YouTube Music | No | Not supported | No lossless audio, and downloading from it violates its terms of service. |
-| MassTamilan and similar film-music sites | — | Not supported | They redistribute label releases (Think Music, Sony, Saregama and others) without a license from the labels. |
+| MassTamilan (`masstamilan.dev`) | MP3 advertised; lossless not verified | Integration blocked; not implemented | The maintainer has authorized integrating this provider. Direct homepage, search, and album requests currently receive an HTTP 403 Cloudflare challenge. See [integration status](masstamilan.md). Public accessibility does not establish permission to distribute or download music. |
+
+## MassTamilan integration status
+
+The project-level restriction on adding MassTamilan has been removed. This does not grant third-party music rights, establish the website's distribution rights, or make every advertised track eligible for download. Users must have permission to download and retain the audio they import. Motif must not assign a Creative Commons or other license to a track unless that license is actually supplied and verified.
+
+The intended integration is specifically for `masstamilan.dev`. Other sites using the MassTamilan name are not substitutes. There is currently no MassTamilan provider in either app, no configuration to enable one, and no verified playback or download support. The [implementation notes](masstamilan.md) record the access blocker and the existing native integration points.
 
 ## Read from Downloads
 
