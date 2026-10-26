@@ -3,7 +3,7 @@ package app.motif.sources
 import app.motif.data.Track
 
 /**
- * A catalog Motif may legally download from (see docs/sources.md). A source
+ * A music catalog. Availability does not establish download rights (see docs/sources.md). A source
  * only talks to its catalog: downloading, tagging and adding to the library
  * are shared by [app.motif.importer.Downloads].
  */
@@ -22,6 +22,7 @@ interface MusicSource {
 
     /** A stream URL for a short listen before downloading, or null. */
     suspend fun previewUrl(result: SourceResult): String? = result.previewUrl
+    suspend fun tracks(result: SourceResult): List<SourceResult> = listOf(result)
 }
 
 /** A search hit: one track (Jamendo) or one release of several files (Internet Archive). */
@@ -38,6 +39,7 @@ data class SourceResult(
     val durationSeconds: Int? = null,
     /** False when the artist only allows streaming. */
     val downloadable: Boolean = true,
+    val isAlbum: Boolean = false,
 ) {
     val subtitle: String get() = listOfNotNull(artist, album?.takeIf { it != title }).joinToString(" · ")
 }

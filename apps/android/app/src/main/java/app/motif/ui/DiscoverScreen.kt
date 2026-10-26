@@ -85,10 +85,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Discover: search open-licensed catalogs, listen before downloading, and
+ * Discover: search music catalogs, listen before downloading, and
  * download with one tap straight into the library (tags, art and analysis
- * included). Lossless only: Jamendo's FLAC, and Internet Archive items with
- * FLAC or WAV files.
+ * included). Each catalog reports the available format and license, where known.
  */
 @Composable
 fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
@@ -98,6 +97,7 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
     val only = sources.getOrNull(scopeIndex - 1)
     var query by rememberSaveable { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<Hit>>(emptyList()) }
+    var previousHits by remember { mutableStateOf<List<Hit>?>(null) }
     var searching by remember { mutableStateOf(false) }
     /** Catalog name to what went wrong, for the catalogs that failed this search. */
     var failures by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -106,21 +106,23 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
     val tracks by app.library.tracks.collectAsStateWithLifecycle()
     val states by app.downloads.states.collectAsStateWithLifecycle()
     val previewing by app.previewer.playing.collectAsStateWithLifecycle()
+    val previewError by app.previewer.error.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     val uri = LocalUriHandler.current
 
     DisposableEffect(Unit) { onDispose { app.previewer.stop() } }
 
-    fun search() {
+    fun search(latest: Boolean = false) {
         val q = query.trim()
         val targets = (only?.let(::listOf) ?: sources).filter { it.isConfigured }
-        if (q.isEmpty() || targets.isEmpty()) return
+        if ((!latest && q.isEmpty()) || targets.isEmpty()) return
         focus.clearFocus()
         scope.launch {
             searching = true
-            val outcome = searchAll(targets, q)
+            val outcome = searchAll(targets, if (latest) "" else q)
             hits = outcome.hits
+            previousHits = null
             failures = outcome.failures
             searchedFor = q
             searching = false
@@ -129,6 +131,7 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
 
     LaunchedEffect(scopeIndex, jamendoId) {
         hits = emptyList()
+        previousHits = null
         failures = emptyMap()
         searchedFor = null
         app.previewer.stop()
@@ -172,13 +175,28 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
         )
 
         val catalogNames = (only?.let(::listOf) ?: sources.filter { it.isConfigured }).joinToString(", ") { it.displayName }
+        previewError?.let { Text(it, color = Motif.secondary, modifier = Modifier.padding(horizontal = 20.dp)) }
+        if (only == null || only.id == "masstamilan") {
+            Text("MassTamilan: only download music you have permission to keep. Public links do not grant music rights.",
+                color = Motif.secondary, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 20.dp))
+        }
+        if (only?.id == "masstamilan") {
+            Button(onClick = { search(latest = true) }, modifier = Modifier.padding(horizontal = 20.dp)) {
+                Text("Browse latest albums")
+            }
+        }
+        if (previousHits != null) {
+            Button(onClick = { hits = previousHits!!; previousHits = null }, modifier = Modifier.padding(horizontal = 20.dp)) {
+                Text("Back to search results")
+            }
+        }
         when {
             only != null && !only.isConfigured -> JamendoSetup(onSave = app::setJamendoClientId)
             searching -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Motif.accent)
             }
             searchedFor == null -> Hint(
-                "Search $catalogNames for music you're free to keep. Downloads go straight into your library, " +
+                "Search $catalogNames. Downloads go straight into your library, " +
                     "with tags, cover art, BPM and key.",
             )
             hits.isEmpty() -> NoResults(
@@ -203,13 +221,30 @@ fun DiscoverScreen(app: MotifApp, modifier: Modifier = Modifier) {
                                 app.previewer.pause()
                             } else {
                                 scope.launch {
-                                    runCatching { source.previewUrl(result) }.getOrNull()?.let { app.previewer.play(key, it) }
+                                    try {
+                                        source.previewUrl(result)?.let { app.previewer.play(key, it) }
+                                    } catch (e: CancellationException) { throw e }
+                                    catch (e: Exception) { failures = mapOf(source.displayName to (e.message ?: "Preview failed")) }
                                 }
                             }
                         },
                         onDownload = { app.downloads.start(source, result) },
                         onCancel = { app.downloads.cancel(source, result) },
                     )
+                    if (result.isAlbum) {
+                        Button(onClick = {
+                            scope.launch {
+                                searching = true
+                                try {
+                                    val albumTracks = source.tracks(result)
+                                    previousHits = hits
+                                    hits = albumTracks.map { Hit(source, it) }
+                                } catch (e: CancellationException) { throw e }
+                                catch (e: Exception) { failures = mapOf(source.displayName to (e.message ?: "Album unavailable")) }
+                                finally { searching = false }
+                            }
+                        }, modifier = Modifier.padding(horizontal = 20.dp)) { Text("Browse tracks") }
+                    }
                 }
             }
         }
@@ -251,8 +286,7 @@ private fun NoResults(query: String, catalogs: String, failures: Map<String, Str
         Text("No results for “$query”", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         if (failures.isNotEmpty()) FailureNote(failures, Modifier)
         Text(
-            "Nothing on $catalogs matches. These catalogs only carry music the artists or archives chose to share freely, " +
-                "so most label releases aren't here. Check the spelling, or look for it in a store:",
+            "Nothing on $catalogs matches. Check the spelling, or look for it in a store:",
             color = Motif.secondary, fontSize = 14.sp,
         )
         storeSearches(query).forEach { (name, url) ->

@@ -7,6 +7,7 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
         case internetArchive = "internet_archive"
         case jamendo
         case audius
+        case masstamilan
         case bandcamp
     }
 

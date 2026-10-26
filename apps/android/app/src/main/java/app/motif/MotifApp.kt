@@ -24,6 +24,7 @@ import app.motif.playback.SessionSource
 import app.motif.sources.AudiusSource
 import app.motif.sources.InternetArchiveSource
 import app.motif.sources.JamendoSource
+import app.motif.sources.MassTamilanSource
 import app.motif.sources.MusicSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -97,7 +98,7 @@ class MotifApp : Application() {
 
     /** Catalogs Discover can search and download from. */
     val sources: List<MusicSource> by lazy {
-        listOf(JamendoSource { _jamendoClientId.value }, InternetArchiveSource(), AudiusSource())
+        listOf(JamendoSource { _jamendoClientId.value }, InternetArchiveSource(), AudiusSource(), MassTamilanSource())
     }
 
     val downloads by lazy { Downloads(cacheDir, importer, scope) }
