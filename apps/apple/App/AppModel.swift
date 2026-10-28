@@ -51,7 +51,11 @@ final class AppModel {
     private(set) var tracks: [Track] = [] {
         didSet {
             albums = Self.albums(of: tracks, artwork: store.artwork)
-            artists = Self.artists(of: tracks)
+            let index = Self.artistIndex(of: tracks)
+            artists = index.groups
+            artistIDsByTrack = index.credits
+            albumsByID = Dictionary(albums.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            artistsByID = Dictionary(artists.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             tracksByKey = Dictionary(tracks.compactMap { t in t.contentHash.map { ($0, t) } }, uniquingKeysWith: { first, _ in first })
         }
     }
@@ -63,6 +67,10 @@ final class AppModel {
     private(set) var albums: [AlbumGroup] = []
     /// Artists by name, from split credits.
     private(set) var artists: [ArtistGroup] = []
+    private var albumsByID: [String: AlbumGroup] = [:]
+    private var artistsByID: [String: ArtistGroup] = [:]
+    /// Each track's credited artists, as artist ids.
+    private var artistIDsByTrack: [UUID: [String]] = [:]
     private(set) var importJobs: [ImportJob] = []
     var errorMessage: String?
 
@@ -71,6 +79,17 @@ final class AppModel {
     var showImport = false
     var showNowPlaying = false
     var showSettings = false
+    #if os(iOS)
+    /// Each tab's navigation stack, so album and artist links from Now Playing push onto the open tab.
+    var phonePaths: [PhoneTab: NavigationPath] = [:]
+
+    func path(for tab: PhoneTab) -> Binding<NavigationPath> {
+        Binding(get: { self.phonePaths[tab] ?? NavigationPath() }, set: { self.phonePaths[tab] = $0 })
+    }
+    #else
+    /// The detail column's stack; the root view clears it when the sidebar selection changes.
+    var macPath = NavigationPath()
+    #endif
     /// A crate being created or renamed; the root view shows the name prompt while set.
     var crateNaming: CrateNaming?
 
@@ -158,7 +177,7 @@ final class AppModel {
             groups[key, default: []].append(t)
         }
         return order.compactMap { key in
-            guard let items = groups[key], let first = items.first, let title = first.album else { return nil }
+            guard let items = groups[key].map(Self.albumOrder), let first = items.first, let title = first.album else { return nil }
             func shared(_ names: [String]) -> String? {
                 let distinct = Dictionary(grouping: names, by: { Self.albumKey($0) })
                 return distinct.count == 1 ? names.first : nil
@@ -168,6 +187,14 @@ final class AppModel {
             let artist = shared(albumArtists) ?? shared(artists) ?? (artists.isEmpty ? nil : "Various artists")
             return AlbumGroup(id: key, title: title.trimmingCharacters(in: .whitespaces), artist: artist, tracks: items,
                               artwork: artwork.flatMap { store in items.first { store.hasArtwork($0.id) }?.id })
+        }
+    }
+
+    /// Disc then track number; tracks without a number after, in import order, then by title.
+    nonisolated static func albumOrder(_ tracks: [Track]) -> [Track] {
+        tracks.sorted {
+            ($0.trackNumber == nil ? 1 : 0, $0.discNumber ?? 1, $0.trackNumber ?? 0, $0.addedAt, $0.title)
+                < ($1.trackNumber == nil ? 1 : 0, $1.discNumber ?? 1, $1.trackNumber ?? 0, $1.addedAt, $1.title)
         }
     }
 
@@ -181,24 +208,72 @@ final class AppModel {
 
     /// A track counts for each credited artist, primary or featured, so "A, B feat. C"
     /// lists the song under A, B and C. "A & B" splits only when both names also appear alone.
-    nonisolated static func artists(of tracks: [Track]) -> [ArtistGroup] {
+    /// Also returns each track's credited artist ids, in credit order.
+    nonisolated static func artistIndex(of tracks: [Track]) -> (groups: [ArtistGroup], credits: [UUID: [String]]) {
         let credited = tracks.filter { !($0.artist ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
-        let credits = credited.map { TagCleaner.splitArtists($0.artist!, known: [String]()) }
-        let known = Set(credits.flatMap { $0.map { TagCleaner.norm($0.name) } })
+        let alone = credited.map { TagCleaner.splitArtists($0.artist!, known: [String]()) }
+        let known = Set(alone.flatMap { $0.map { TagCleaner.norm($0.name) } })
         var names: [String: String] = [:]
         var byKey: [String: [Track]] = [:]
+        var credits: [UUID: [String]] = [:]
         for track in credited {
             for credit in TagCleaner.splitArtists(track.artist!, known: known) {
                 let key = TagCleaner.norm(credit.name)
                 if names[key] == nil { names[key] = credit.name }
-                if byKey[key]?.last?.id != track.id { byKey[key, default: []].append(track) }
+                if byKey[key]?.last?.id != track.id {
+                    byKey[key, default: []].append(track)
+                    credits[track.id, default: []].append(key)
+                }
             }
         }
         var groups = byKey.map { ArtistGroup(id: $0.key, name: names[$0.key] ?? $0.key, tracks: $0.value) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         let unknown = tracks.filter { ($0.artist ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
-        if !unknown.isEmpty { groups.append(ArtistGroup(id: "\u{0}unknown", name: "Unknown artist", tracks: unknown)) }
-        return groups
+        if !unknown.isEmpty {
+            groups.append(ArtistGroup(id: unknownArtistID, name: "Unknown artist", tracks: unknown))
+            for t in unknown { credits[t.id] = [unknownArtistID] }
+        }
+        return (groups, credits)
+    }
+
+    nonisolated static let unknownArtistID = "\u{0}unknown"
+
+    // MARK: - Albums and artists
+
+    func album(id: String) -> AlbumGroup? { albumsByID[id] }
+
+    func artist(id: String) -> ArtistGroup? { artistsByID[id] }
+
+    /// The album a track is on, if it's tagged with one.
+    func album(for track: Track) -> AlbumGroup? {
+        track.album.flatMap { albumsByID[Self.albumKey($0)] }
+    }
+
+    /// The track's credited artists, primary first; the unknown artist when it credits none.
+    func artists(for track: Track) -> [ArtistGroup] {
+        (artistIDsByTrack[track.id] ?? []).compactMap { artistsByID[$0] }
+    }
+
+    /// The artist an album is credited to, when it's one artist in the library (not "Various artists").
+    func artist(for album: AlbumGroup) -> ArtistGroup? {
+        guard let name = album.artist else { return nil }
+        return artistsByID[TagCleaner.norm(name)]
+    }
+
+    /// Albums with at least one of the artist's songs, in library order.
+    func albums(for artist: ArtistGroup) -> [AlbumGroup] {
+        let ids = Set(artist.tracks.map(\.id))
+        return albums.filter { $0.tracks.contains { ids.contains($0.id) } }
+    }
+
+    /// Opens an album or artist page on the visible stack, closing Now Playing first.
+    func open(_ route: LibraryRoute) {
+        #if os(iOS)
+        showNowPlaying = false
+        phonePaths[phoneTab, default: NavigationPath()].append(route)
+        #else
+        macPath.append(route)
+        #endif
     }
 
     // MARK: - Crates
@@ -385,6 +460,26 @@ final class AppModel {
             let url = await store.url(for: track)
             if await artwork.extract(track.id, from: url) { found = true }
         }
+        if found { await refresh() }
+    }
+
+    /// Reads track and disc numbers once for tracks imported before they were kept, so albums play in order.
+    func backfillTrackNumbers() async {
+        let key = "trackNumbersBackfilled"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        var found = false
+        for track in tracks where track.trackNumber == nil {
+            let position = await ImportService.albumPosition(of: await store.url(for: track))
+            guard position.track != nil || position.disc != nil else { continue }
+            do {
+                try await store.updateTrackNumbers(id: track.id, track: position.track, disc: position.disc)
+                found = true
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
+        UserDefaults.standard.set(true, forKey: key)
         if found { await refresh() }
     }
 

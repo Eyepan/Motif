@@ -176,6 +176,33 @@ class PlaybackEngine(
         onMixIntoNextChanged(on)
     }
 
+    /**
+     * Queues [tracks] right after the current one, or plays them when nothing
+     * is loaded. During a blend they go after the incoming track, so the blend
+     * carries on; otherwise a deck loaded ahead for the old next track is dropped.
+     */
+    fun playNext(tracks: List<Track>, context: PlayContext = PlayContext.LIBRARY) {
+        val s = _state.value
+        if (s.current == null) return play(tracks, 0, context)
+        if (tracks.isEmpty()) return
+        val blending = helperLive
+        if (!blending) cancelMix()
+        insert(tracks, minOf(s.queue.size, s.currentIndex + if (blending) 2 else 1))
+    }
+
+    /** Adds [tracks] to the end of the queue, or plays them when nothing is loaded. */
+    fun addToQueue(tracks: List<Track>, context: PlayContext = PlayContext.LIBRARY) {
+        val s = _state.value
+        if (s.current == null) return play(tracks, 0, context)
+        if (tracks.isEmpty()) return
+        insert(tracks, s.queue.size)
+    }
+
+    private fun insert(tracks: List<Track>, at: Int) {
+        player.addMediaItems(at, tracks.map(::mediaItem))
+        _state.update { it.copy(queue = it.queue.take(at) + tracks + it.queue.drop(at)) }
+    }
+
     /** Drops a deleted track from the queue without interrupting what's playing. */
     fun remove(track: Track) {
         val index = _state.value.queue.indexOfFirst { it.id == track.id }

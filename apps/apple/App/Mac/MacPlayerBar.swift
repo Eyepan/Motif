@@ -13,7 +13,7 @@ struct MacPlayerBar: View {
                     ArtTile(seed: track.artSeed, letter: track.monogram, size: 40, radius: 6, artwork: track.id)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(track.title).fontWeight(.semibold)
-                        Text(track.subtitle).font(.system(size: 12)).foregroundStyle(Theme.secondary)
+                        CreditLinks(track: track).font(.system(size: 12))
                     }
                     .lineLimit(1)
                 } else {

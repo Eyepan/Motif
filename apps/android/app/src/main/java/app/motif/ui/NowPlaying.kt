@@ -167,7 +167,7 @@ fun NowPlayingSheet(state: PlayerState, engine: PlaybackEngine, onDismiss: () ->
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(track.title, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Motif.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(track.subtitle, fontSize = 17.sp, color = Color(0xFFB5BAC3), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                CreditLinks(track, fontSize = 17.sp, color = Color(0xFFB5BAC3))
             }
             TrackChips(track)
 

@@ -100,6 +100,10 @@ struct PhoneCrateDetailView: View {
                         .swipeActions {
                             Button("Remove", role: .destructive) { Task { await model.remove([track], from: crate) } }
                         }
+                        .contextMenu {
+                            TrackMenuItems(tracks: [track])
+                            Button("Remove from Crate", role: .destructive) { Task { await model.remove([track], from: crate) } }
+                        }
                     }
                 } header: {
                     SectionHeader(title: "Songs", detail: crateSummary(songs, missing: missing))

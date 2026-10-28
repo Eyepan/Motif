@@ -1,10 +1,13 @@
 package app.motif
 
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -50,11 +53,15 @@ class AccountFlowTest {
         compose.onNodeWithText("Not signed in").assertExists()
         Screenshots.take("account-settings")
 
+        // The settings list is lazy: bring a row into view before tapping it, or it may not be composed yet.
+        val settings = compose.onNode(hasScrollToNodeAction() and hasAnyDescendant(hasText("Not signed in")))
+        settings.performScrollToNode(hasText("Listening history"))
         compose.onNodeWithText("Listening history").performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("No plays yet", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         Screenshots.take("account-history")
         compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
+        settings.performScrollToNode(hasText("Server"))
         compose.onNodeWithText("Server").performClick()
         compose.waitUntil(5_000) { compose.onAllNodes(hasText("motif-server.vercel.app", substring = true)).fetchSemanticsNodes().isNotEmpty() }
         Screenshots.take("account-server")

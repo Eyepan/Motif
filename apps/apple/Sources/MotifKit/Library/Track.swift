@@ -41,6 +41,9 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
     public var firstDownbeat: Double?
     /// `TrackAnalyzer.version` of the last analysis, nil if never analysed by a version that records it.
     public var analyzerVersion: Int?
+    /// Position on the album, as tagged.
+    public var trackNumber: Int?
+    public var discNumber: Int?
 
     public init(
         id: UUID = UUID(), title: String, artist: String? = nil, album: String? = nil,
@@ -48,7 +51,7 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
         bitDepth: Int? = nil, channels: Int? = nil, source: Source, sourceRef: String? = nil,
         licenseURL: URL? = nil, bpm: Double? = nil, loudnessDb: Double? = nil, musicalKey: String? = nil,
         waveform: [UInt8]? = nil, addedAt: Date = .now, albumArtist: String? = nil, contentHash: String? = nil,
-        firstDownbeat: Double? = nil, analyzerVersion: Int? = nil
+        firstDownbeat: Double? = nil, analyzerVersion: Int? = nil, trackNumber: Int? = nil, discNumber: Int? = nil
     ) {
         self.id = id; self.title = title; self.artist = artist; self.album = album
         self.durationMs = durationMs; self.filePath = filePath; self.format = format
@@ -58,6 +61,7 @@ public struct Track: Identifiable, Hashable, Codable, Sendable {
         self.waveform = waveform; self.addedAt = addedAt; self.albumArtist = albumArtist
         self.contentHash = contentHash
         self.firstDownbeat = firstDownbeat; self.analyzerVersion = analyzerVersion
+        self.trackNumber = trackNumber; self.discNumber = discNumber
     }
 
     /// Tempo and first downbeat are known, so the track can be beatmatched, looped and synced.

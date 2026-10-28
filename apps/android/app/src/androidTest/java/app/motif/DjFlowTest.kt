@@ -96,7 +96,8 @@ class DjFlowTest {
 
         // SYNC nudges deck B's speed for a moment while it pulls into phase, then settles on deck A's tempo.
         val expected = { app.dj.state.value.a.bpm!! / tracks.getValue("Neon Glide").bpm!! }
-        compose.waitUntil(5_000) {
+        // Generous: a slow emulator can take several seconds to pull into phase.
+        compose.waitUntil(15_000) {
             val b = app.dj.state.value.b
             b.synced && b.isPlaying && abs(b.speed - expected()) < 0.01
         }
@@ -119,8 +120,12 @@ class DjFlowTest {
         compose.waitUntil(5_000) { app.dj.state.value.a.isPlaying && app.dj.state.value.a.positionMs > 300 }
 
         // Two beats at 120 BPM: a one-second loop that the deck keeps returning to.
+        // Set it while paused: a playing deck keeps the UI busy, and on a slow emulator the click can
+        // wait until the 20 s fixture has played out, leaving no track for the loop.
+        instrumentation.runOnMainSync { app.dj.togglePlay(DeckId.A) }
         compose.onNodeWithContentDescription("Deck A loop 2 beats").performClick()
         val loop = app.dj.state.value.a.loop ?: error("no loop: ${app.dj.state.value.notice}, deck ${app.dj.state.value.a}")
+        instrumentation.runOnMainSync { app.dj.togglePlay(DeckId.A) }
         assertEquals(1_000.0, (loop.endMs - loop.startMs).toDouble(), 2.0)
         Thread.sleep(2_600)
         val pos = app.dj.state.value.a.positionMs
